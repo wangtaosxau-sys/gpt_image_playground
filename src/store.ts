@@ -52,6 +52,7 @@ import { validateMaskMatchesImage } from './lib/canvasImage'
 import { orderInputImagesForMask } from './lib/mask'
 import { getChangedParams, normalizeParamsForSettings } from './lib/paramCompatibility'
 import { createTransparentOutputMeta, getTransparentRequestParams, removeKeyedBackgroundFromDataUrl } from './lib/transparentImage'
+import { getAppStorageName } from './lib/storageNamespace'
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate'
 
 export const ALL_FAVORITES_COLLECTION_ID = '__all_favorites__'
@@ -1602,7 +1603,7 @@ export const useStore = create<AppState>()(
       },
     }),
     {
-      name: 'gpt-image-playground',
+      name: getAppStorageName(),
       version: 2,
       migrate: (persistedState) => migratePersistedState(persistedState),
       partialize: getPersistedState,

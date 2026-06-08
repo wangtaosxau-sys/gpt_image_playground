@@ -1,7 +1,8 @@
 {
+  "_note": "Copy to dev-proxy.config.json and replace target with your own API base URL. Do not commit dev-proxy.config.json.",
   "enabled": true,
   "prefix": "/api-proxy",
-  "target": "http://127.0.0.1:3000",
+  "target": "https://api.example.com/v1",
   "changeOrigin": true,
-  "secure": false
+  "secure": true
 }

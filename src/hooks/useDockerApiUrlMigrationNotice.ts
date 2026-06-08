@@ -1,8 +1,9 @@
 import { useEffect } from 'react'
 import { useStore } from '../store'
 import { readRuntimeEnv } from '../lib/runtimeEnv'
+import { getStorageKey } from '../lib/storageNamespace'
 
-const NOTICE_KEY = 'docker-api-url-migration-notice-v1'
+const NOTICE_KEY = getStorageKey('docker-api-url-migration-notice-v1', 'docker-api-url-migration-notice-v1')
 
 export function useDockerApiUrlMigrationNotice() {
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
