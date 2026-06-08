@@ -90,6 +90,17 @@
 
 ---
 
+## 📚 文档索引
+
+- [本地启动与验证](docs/local-setup.md)：本机开发、代理、模拟 API 与验证命令。
+- [批量功能](docs/batch-features.md)：Gallery 批量变量、并发设置、Agent 批量边界与后续建议。
+- [桌面端路线](docs/desktop-roadmap.md)：未来 Wails 方向、`runtimeHost` 能力边界与非目标。
+- [App 路线](docs/mobile-app-roadmap.md)：PWA 优先、Capacitor APK 第二阶段与暂缓路线。
+- [自定义服务商 LLM 提示词](docs/custom-provider-llm-prompt.md)：让 LLM 根据第三方 API 文档生成可导入配置。
+- [本地故障模拟 API](docs/mock-image-api.md)：复现跨域、响应结构异常、图片 URL 下载失败等场景。
+
+---
+
 ## ✨ 核心特性
 
 ### 🎨 强大的图像生成与编辑
@@ -331,7 +342,7 @@ npm run build
 **方式一：标准 OpenAI 兼容服务商**
 直接使用简短的查询参数配置：
 - `?apiUrl=https://你的代理地址.com`
-- `?apiKey=sk-xxxx`
+- `?apiKey=<your-key>`
 - `?apiMode=images` 或 `?apiMode=responses`（未传时默认为 `images`）
 - `?model=gpt-image-2`（未传时按 `apiMode` 使用默认模型）
 - `?codexCli=true`（开启 Codex CLI 兼容模式）

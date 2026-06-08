@@ -18,6 +18,7 @@ import {
   isOpenAICompatibleProvider,
   mergeImportedSettings,
   normalizeAgentMaxToolRounds,
+  normalizeGalleryBatchConcurrency,
   normalizeCustomProviderDefinition,
   normalizeSettings,
   normalizeStreamPartialImages,
@@ -25,7 +26,7 @@ import {
 } from '../lib/apiProfiles'
 import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
 import { requestBrowserNotificationPermission, type BrowserNotificationPermissionResult } from '../lib/browserNotification'
-import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings, type CustomProviderDefinition, type ZipDownloadRoute } from '../types'
+import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_GALLERY_BATCH_CONCURRENCY, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings, type CustomProviderDefinition, type ZipDownloadRoute } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { DEFAULT_DROPDOWN_MAX_HEIGHT, getDropdownMaxHeight } from '../lib/dropdown'
@@ -316,6 +317,7 @@ export default function SettingsModal() {
   const [draft, setDraft] = useState<AppSettings>(normalizeSettings(settings))
   const [timeoutInput, setTimeoutInput] = useState(String(getActiveApiProfile(settings).timeout))
   const [agentMaxToolRoundsInput, setAgentMaxToolRoundsInput] = useState(String(settings.agentMaxToolRounds))
+  const [galleryBatchConcurrencyInput, setGalleryBatchConcurrencyInput] = useState(String(settings.galleryBatchConcurrency))
   const [showApiKey, setShowApiKey] = useState(false)
   const [showProfileMenu, setShowProfileMenu] = useState(false)
   const [profileMenuMaxHeight, setProfileMenuMaxHeight] = useState(DEFAULT_DROPDOWN_MAX_HEIGHT)
@@ -433,6 +435,7 @@ export default function SettingsModal() {
     setDraft(nextDraft)
     setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
     setAgentMaxToolRoundsInput(String(nextDraft.agentMaxToolRounds))
+    setGalleryBatchConcurrencyInput(String(nextDraft.galleryBatchConcurrency))
   }, [apiProxyAvailable, apiProxyLocked, showSettings, settings, reusedTaskApiProfileId])
 
   useEffect(() => {
@@ -661,9 +664,13 @@ export default function SettingsModal() {
     const normalizedAgentMaxToolRounds = agentMaxToolRoundsInput.trim() === ''
       ? DEFAULT_AGENT_MAX_TOOL_ROUNDS
       : normalizeAgentMaxToolRounds(agentMaxToolRoundsInput, draft.agentMaxToolRounds)
+    const normalizedGalleryBatchConcurrency = galleryBatchConcurrencyInput.trim() === ''
+      ? DEFAULT_GALLERY_BATCH_CONCURRENCY
+      : normalizeGalleryBatchConcurrency(galleryBatchConcurrencyInput, draft.galleryBatchConcurrency)
     const nextDraft = {
       ...draft,
       agentMaxToolRounds: normalizedAgentMaxToolRounds,
+      galleryBatchConcurrency: normalizedGalleryBatchConcurrency,
       profiles: activeProviderIsOpenAICompatible
         ? draft.profiles.map((profile) =>
             profile.id === activeProfile.id ? { ...profile, timeout: normalizedTimeout } : profile,
@@ -671,6 +678,7 @@ export default function SettingsModal() {
         : draft.profiles,
     }
     setAgentMaxToolRoundsInput(String(normalizedAgentMaxToolRounds))
+    setGalleryBatchConcurrencyInput(String(normalizedGalleryBatchConcurrency))
     commitSettings(nextDraft)
     setShowSettings(false)
   }
@@ -691,6 +699,14 @@ export default function SettingsModal() {
     setAgentMaxToolRoundsInput(String(value))
     if (value !== draft.agentMaxToolRounds) commitSettings({ ...draft, agentMaxToolRounds: value })
   }, [agentMaxToolRoundsInput, draft])
+
+  const commitGalleryBatchConcurrency = useCallback(() => {
+    const value = galleryBatchConcurrencyInput.trim() === ''
+      ? DEFAULT_GALLERY_BATCH_CONCURRENCY
+      : normalizeGalleryBatchConcurrency(galleryBatchConcurrencyInput, draft.galleryBatchConcurrency)
+    setGalleryBatchConcurrencyInput(String(value))
+    if (value !== draft.galleryBatchConcurrency) commitSettings({ ...draft, galleryBatchConcurrency: value })
+  }, [galleryBatchConcurrencyInput, draft])
 
   const showNotificationPermissionMessage = (result: Exclude<BrowserNotificationPermissionResult, { ok: true }>) => {
     if (result.reason === 'unsupported') {
@@ -1296,6 +1312,21 @@ export default function SettingsModal() {
                     {zipDownloadRouteSummary}
                   </div>
                 </div>
+                <label className="block">
+                  <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">Gallery 批量并发数</span>
+                  <input
+                    value={galleryBatchConcurrencyInput}
+                    onChange={(e) => setGalleryBatchConcurrencyInput(e.target.value)}
+                    onBlur={commitGalleryBatchConcurrency}
+                    type="number"
+                    min={1}
+                    max={8}
+                    className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                  />
+                  <div data-selectable-text className="mt-1.5 text-xs leading-relaxed text-gray-500 dark:text-gray-500">
+                    默认 3，范围 1-8。只控制 Gallery 批量任务同时启动的数量，不改变每个任务的输出数量。
+                  </div>
+                </label>
                 <div className="block">
                   <div className="mb-1 flex items-center justify-between">
                     <span className="block text-sm text-gray-600 dark:text-gray-300">重启后加载上次的输入框</span>

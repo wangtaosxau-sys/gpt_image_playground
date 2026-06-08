@@ -11,6 +11,7 @@ import type {
   TaskParams,
   InputImage,
   MaskDraft,
+  GalleryBatchDraft,
   TaskRecord,
   FavoriteCollection,
   ExportData,
@@ -86,6 +87,11 @@ const OPENAI_INTERRUPTED_ERROR = '请求中断'
 const AGENT_STOPPED_MESSAGE = '已停止生成。'
 const AGENT_CONVERSATION_TITLE_MAX_LENGTH = 28
 const ERROR_TOAST_MAX_LENGTH = 80
+const DEFAULT_GALLERY_BATCH_DRAFT: GalleryBatchDraft = {
+  enabled: false,
+  variableCollapsed: false,
+  variableItems: [],
+}
 type ToastType = 'info' | 'success' | 'error'
 type AgentInputDraft = {
   prompt: string
@@ -666,6 +672,7 @@ function getLatestAgentConversation(conversations: AgentConversation[]) {
 export function getPersistedState(state: AppState) {
   const settings = normalizeSettings(state.settings)
   const galleryInputDraft = getPersistableGalleryInputDraft(state)
+  const galleryBatchDraft = normalizeGalleryBatchDraft(state.galleryBatchDraft)
   return {
     settings,
     params: state.params,
@@ -680,6 +687,9 @@ export function getPersistedState(state: AppState) {
     galleryInputDraft: settings.persistInputOnRestart && galleryInputDraft
       ? { ...galleryInputDraft, inputImages: galleryInputDraft.inputImages.map((img) => ({ id: img.id, dataUrl: '' })) }
       : null,
+    galleryBatchDraft: settings.persistInputOnRestart && !isEmptyGalleryBatchDraft(galleryBatchDraft)
+      ? copyGalleryBatchDraft(galleryBatchDraft)
+      : { ...DEFAULT_GALLERY_BATCH_DRAFT },
     ...(agentConversationMigrationPending && !agentConversationPersistenceReady
       ? { agentConversations: getPersistableAgentConversations(state.agentConversations) }
       : {}),
@@ -729,6 +739,9 @@ function mergePersistedState(persistedState: unknown, currentState: AppState): A
         maskEditorImageId: null,
       })
     : null
+  const galleryBatchDraft = settings.persistInputOnRestart
+    ? normalizeGalleryBatchDraft(persisted.galleryBatchDraft)
+    : { ...DEFAULT_GALLERY_BATCH_DRAFT }
   const normalizedAgentInputDrafts = hasPersistedAgentConversations
     ? normalizeAgentInputDrafts(persisted.agentInputDrafts, agentConversations)
     : normalizeAgentInputDraftsByKey(persisted.agentInputDrafts)
@@ -757,6 +770,7 @@ function mergePersistedState(persistedState: unknown, currentState: AppState): A
     settings,
     appMode,
     galleryInputDraft: galleryInputDraft && !isEmptyAgentInputDraft(galleryInputDraft) ? galleryInputDraft : null,
+    galleryBatchDraft,
     agentConversations,
     activeAgentConversationId,
     agentInputDrafts,
@@ -806,6 +820,13 @@ interface AppState {
   maskEditorImageId: string | null
   setMaskEditorImageId: (id: string | null) => void
   galleryInputDraft: AgentInputDraft | null
+  galleryBatchDraft: GalleryBatchDraft
+  setGalleryBatchEnabled: (enabled: boolean) => void
+  setGalleryBatchVariableCollapsed: (collapsed: boolean) => void
+  addGalleryBatchVariableItem: () => void
+  updateGalleryBatchVariableItemText: (itemId: string, text: string) => void
+  setGalleryBatchVariableItemCollapsed: (itemId: string, collapsed: boolean) => void
+  removeGalleryBatchVariableItem: (itemId: string) => void
 
   // 参数
   params: TaskParams
@@ -997,6 +1018,39 @@ function normalizeAgentInputDraft(value: unknown, fallbackUpdatedAt = Date.now()
     maskEditorImageId: typeof draft.maskEditorImageId === 'string' ? draft.maskEditorImageId : null,
     updatedAt,
   }
+}
+
+function normalizeGalleryBatchDraft(value: unknown): GalleryBatchDraft {
+  const draft = isRecord(value) ? value : {}
+  const variableItems = Array.isArray(draft.variableItems)
+    ? draft.variableItems
+        .map((item): GalleryBatchDraft['variableItems'][number] | null => {
+          if (!isRecord(item)) return null
+          return {
+            id: typeof item.id === 'string' && item.id.trim() ? item.id : genId(),
+            text: typeof item.text === 'string' ? item.text : '',
+            collapsed: Boolean(item.collapsed),
+          }
+        })
+        .filter((item): item is GalleryBatchDraft['variableItems'][number] => item != null)
+    : []
+  return {
+    enabled: Boolean(draft.enabled),
+    variableCollapsed: Boolean(draft.variableCollapsed),
+    variableItems,
+  }
+}
+
+function copyGalleryBatchDraft(draft: GalleryBatchDraft): GalleryBatchDraft {
+  return {
+    enabled: draft.enabled,
+    variableCollapsed: draft.variableCollapsed,
+    variableItems: draft.variableItems.map((item) => ({ ...item })),
+  }
+}
+
+function isEmptyGalleryBatchDraft(draft: GalleryBatchDraft) {
+  return !draft.enabled && !draft.variableCollapsed && draft.variableItems.length === 0
 }
 
 function normalizeAgentInputDrafts(value: unknown, conversations: AgentConversation[]): Record<string, AgentInputDraft> {
@@ -1351,6 +1405,41 @@ export const useStore = create<AppState>()(
         set((s) => syncActiveInputDraft(s, { maskEditorImageId }))
       },
       galleryInputDraft: null,
+      galleryBatchDraft: { ...DEFAULT_GALLERY_BATCH_DRAFT },
+      setGalleryBatchEnabled: (enabled) => set((s) => ({
+        galleryBatchDraft: {
+          ...copyGalleryBatchDraft(s.galleryBatchDraft),
+          enabled,
+        },
+      })),
+      setGalleryBatchVariableCollapsed: (variableCollapsed) => set((s) => ({
+        galleryBatchDraft: {
+          ...copyGalleryBatchDraft(s.galleryBatchDraft),
+          variableCollapsed,
+        },
+      })),
+      addGalleryBatchVariableItem: () => set((s) => {
+        const next = copyGalleryBatchDraft(s.galleryBatchDraft)
+        next.enabled = true
+        next.variableCollapsed = false
+        next.variableItems.push({ id: genId(), text: '', collapsed: false })
+        return { galleryBatchDraft: next }
+      }),
+      updateGalleryBatchVariableItemText: (itemId, text) => set((s) => {
+        const next = copyGalleryBatchDraft(s.galleryBatchDraft)
+        next.variableItems = next.variableItems.map((item) => item.id === itemId ? { ...item, text } : item)
+        return { galleryBatchDraft: next }
+      }),
+      setGalleryBatchVariableItemCollapsed: (itemId, collapsed) => set((s) => {
+        const next = copyGalleryBatchDraft(s.galleryBatchDraft)
+        next.variableItems = next.variableItems.map((item) => item.id === itemId ? { ...item, collapsed } : item)
+        return { galleryBatchDraft: next }
+      }),
+      removeGalleryBatchVariableItem: (itemId) => set((s) => {
+        const next = copyGalleryBatchDraft(s.galleryBatchDraft)
+        next.variableItems = next.variableItems.filter((item) => item.id !== itemId)
+        return { galleryBatchDraft: next }
+      }),
 
       // Params
       params: { ...DEFAULT_PARAMS },
@@ -2355,6 +2444,158 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
 
   // 异步调用 API
   executeTask(taskId)
+}
+
+export function getGalleryBatchRows(draft: GalleryBatchDraft) {
+  return draft.variableItems
+    .map((item, index) => ({
+      lineId: item.id,
+      lineNumber: index + 1,
+      text: item.text.trim(),
+    }))
+    .filter((row) => row.text.length > 0)
+}
+
+function buildGalleryBatchPrompt(commonPrompt: string, rowText: string) {
+  const common = commonPrompt.trim()
+  return common ? `${common}\n\n${rowText}` : rowText
+}
+
+async function runWithConcurrency<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>) {
+  const limit = Math.max(1, Math.min(items.length || 1, Math.trunc(concurrency)))
+  let nextIndex = 0
+
+  await Promise.all(Array.from({ length: limit }, async () => {
+    while (nextIndex < items.length) {
+      const item = items[nextIndex++]
+      await worker(item)
+    }
+  }))
+}
+
+/** 提交 Gallery 批量任务 */
+export async function submitBatchTasks(options: { useCurrentApiProfileWhenReusedMissing?: boolean } = {}) {
+  const {
+    settings,
+    prompt,
+    inputImages,
+    maskDraft,
+    params,
+    galleryBatchDraft,
+    reusedTaskApiProfileId,
+    reusedTaskApiProfileName,
+    reusedTaskApiProfileMissing,
+    showToast,
+    setConfirmDialog,
+  } = useStore.getState()
+
+  if (maskDraft) {
+    showToast('批量模式暂不支持遮罩编辑', 'error')
+    return
+  }
+
+  const rows = getGalleryBatchRows(galleryBatchDraft)
+  if (rows.length === 0) {
+    showToast('请增加变量并填写内容', 'error')
+    return
+  }
+
+  const normalizedSettings = normalizeSettings(settings)
+  let activeProfile = getActiveApiProfile(settings)
+  let requestSettings = createSettingsForApiProfile(normalizedSettings, activeProfile)
+  if (normalizedSettings.reuseTaskApiProfileTemporarily && (reusedTaskApiProfileId || reusedTaskApiProfileMissing)) {
+    const reusedProfile = getReusedTaskApiProfile(normalizedSettings, reusedTaskApiProfileId)
+    if (!reusedProfile) {
+      if (options.useCurrentApiProfileWhenReusedMissing) {
+        useStore.getState().setReusedTaskApiProfile(null)
+      } else {
+        setConfirmDialog({
+          title: '找不到 API 配置',
+          message: `找不到复用任务所使用的 API 配置「${reusedTaskApiProfileName || '未知配置'}」，要使用当前的 API 配置「${activeProfile.name}」提交任务吗？`,
+          confirmText: '使用当前配置提交',
+          cancelText: '放弃提交',
+          action: () => {
+            void submitBatchTasks({ ...options, useCurrentApiProfileWhenReusedMissing: true })
+          },
+        })
+        return
+      }
+    } else {
+      activeProfile = reusedProfile
+      requestSettings = createSettingsForApiProfile(normalizedSettings, reusedProfile)
+    }
+  }
+
+  const apiProfileError = validateApiProfile(activeProfile)
+  if (apiProfileError) {
+    showToast(`请先完善请求 API 配置：${apiProfileError}`, 'error')
+    useStore.getState().setShowSettings(true)
+    return
+  }
+
+  for (const img of inputImages) {
+    await storeImage(img.dataUrl)
+  }
+
+  const normalizedParams = normalizeParamsForSettings(params, requestSettings, { hasInputImages: inputImages.length > 0 })
+  const shouldUseTransparentOutput = normalizedParams.output_format === 'png' && normalizedParams.transparent_output
+  const taskParams = shouldUseTransparentOutput
+    ? getTransparentRequestParams(normalizedParams)
+    : { ...normalizedParams, transparent_output: false }
+  const normalizedParamPatch = getChangedParams(params, taskParams)
+  if (Object.keys(normalizedParamPatch).length) {
+    useStore.getState().setParams(normalizedParamPatch)
+  }
+
+  const now = Date.now()
+  const tasks = rows.map((row, index): TaskRecord => {
+    const taskPrompt = buildGalleryBatchPrompt(prompt, row.text)
+    const transparentMeta = taskParams.transparent_output
+      ? createTransparentOutputMeta(taskPrompt.trim())
+      : null
+
+    return {
+      id: genId(),
+      prompt: taskPrompt,
+      params: taskParams,
+      apiProvider: activeProfile.provider,
+      apiProfileId: activeProfile.id,
+      apiProfileName: activeProfile.name,
+      apiMode: activeProfile.apiMode,
+      apiModel: activeProfile.model,
+      inputImageIds: inputImages.map((i) => i.id),
+      maskTargetImageId: null,
+      maskImageId: null,
+      transparentOutput: transparentMeta?.transparentOutput,
+      transparentPrompt: transparentMeta?.effectivePrompt,
+      outputImages: [],
+      status: 'running',
+      error: null,
+      createdAt: now + index,
+      finishedAt: null,
+      elapsed: null,
+    }
+  })
+
+  const latestTasks = useStore.getState().tasks
+  useStore.getState().setTasks([...tasks, ...latestTasks])
+  await Promise.all(tasks.map((task) => putTask(task)))
+  const batchConcurrency = normalizedSettings.galleryBatchConcurrency
+  useStore.getState().showToast(`已提交 ${tasks.length} 个任务，并发 ${batchConcurrency}`, 'success')
+
+  if (settings.clearInputAfterSubmit) {
+    useStore.getState().setPrompt('')
+    useStore.getState().clearInputImages()
+    useStore.setState((state) => ({
+      galleryBatchDraft: {
+        ...copyGalleryBatchDraft(state.galleryBatchDraft),
+        variableItems: [],
+      },
+    }))
+  }
+  useStore.getState().setReusedTaskApiProfile(null)
+
+  void runWithConcurrency(tasks, batchConcurrency, (task) => executeTask(task.id))
 }
 
 function getActiveAgentConversation(): AgentConversation {

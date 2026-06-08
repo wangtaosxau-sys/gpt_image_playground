@@ -18,6 +18,7 @@ export type ApiProvider = BuiltInApiProvider | string
 export type CustomProviderTemplate = 'http-image'
 export const DEFAULT_STREAM_PARTIAL_IMAGES = 1
 export const DEFAULT_AGENT_MAX_TOOL_ROUNDS = 15
+export const DEFAULT_GALLERY_BATCH_CONCURRENCY = 3
 
 export type CustomProviderRequestMethod = 'GET' | 'POST'
 export type CustomProviderContentType = 'json' | 'multipart'
@@ -107,6 +108,7 @@ export interface AppSettings {
   agentScrollToBottomAfterSubmit: boolean
   agentMaxToolRounds: number
   agentWebSearch: boolean
+  galleryBatchConcurrency: number
   profiles: ApiProfile[]
   activeProfileId: string
 }
@@ -146,6 +148,18 @@ export interface MaskDraft {
   targetImageId: string
   maskDataUrl: string
   updatedAt: number
+}
+
+export interface GalleryBatchVariableItem {
+  id: string
+  text: string
+  collapsed?: boolean
+}
+
+export interface GalleryBatchDraft {
+  enabled: boolean
+  variableCollapsed: boolean
+  variableItems: GalleryBatchVariableItem[]
 }
 
 // ===== 任务记录 =====

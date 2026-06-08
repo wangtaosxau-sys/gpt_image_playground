@@ -13,7 +13,7 @@ import type {
   CustomProviderTemplate,
   ReferenceImageEditAction,
 } from '../types'
-import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, DEFAULT_ZIP_DOWNLOAD_ROUTES, ZIP_DOWNLOAD_ROUTE_VALUES } from '../types'
+import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_GALLERY_BATCH_CONCURRENCY, DEFAULT_STREAM_PARTIAL_IMAGES, DEFAULT_ZIP_DOWNLOAD_ROUTES, ZIP_DOWNLOAD_ROUTE_VALUES } from '../types'
 import { shouldUseApiProxy } from './devProxy'
 import { readRuntimeEnv } from './runtimeEnv'
 import { isImportableConfigUrl } from './customProviderConfigUrl'
@@ -72,6 +72,13 @@ export function normalizeAgentMaxToolRounds(value: unknown, fallback: number | u
   const numeric = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(numeric)) return fallbackValue
   return Math.min(50, Math.max(1, Math.trunc(numeric)))
+}
+
+export function normalizeGalleryBatchConcurrency(value: unknown, fallback: number | undefined = DEFAULT_GALLERY_BATCH_CONCURRENCY): number {
+  const fallbackValue = fallback ?? DEFAULT_GALLERY_BATCH_CONCURRENCY
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric)) return fallbackValue
+  return Math.min(8, Math.max(1, Math.trunc(numeric)))
 }
 
 function normalizeReferenceImageEditAction(value: unknown): ReferenceImageEditAction {
@@ -507,6 +514,7 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     agentScrollToBottomAfterSubmit: typeof record.agentScrollToBottomAfterSubmit === 'boolean' ? record.agentScrollToBottomAfterSubmit : true,
     agentMaxToolRounds: normalizeAgentMaxToolRounds(record.agentMaxToolRounds),
     agentWebSearch: typeof record.agentWebSearch === 'boolean' ? record.agentWebSearch : false,
+    galleryBatchConcurrency: normalizeGalleryBatchConcurrency(record.galleryBatchConcurrency),
     profiles,
     activeProfileId,
   }
@@ -795,4 +803,5 @@ export const DEFAULT_SETTINGS: AppSettings = normalizeSettings({
   agentScrollToBottomAfterSubmit: true,
   agentMaxToolRounds: DEFAULT_AGENT_MAX_TOOL_ROUNDS,
   agentWebSearch: false,
+  galleryBatchConcurrency: DEFAULT_GALLERY_BATCH_CONCURRENCY,
 })

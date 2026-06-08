@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback, useState, useMemo, useLayoutEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ALL_FAVORITES_COLLECTION_ID, deleteFavoriteCollection, getTaskFavoriteCollectionIds, useStore, submitTask, submitAgentMessage, stopAgentResponse, addImageFromFile, createInputImageFromFile, deleteImageIfUnreferenced, removeMultipleTasks, getCachedImage, ensureImageCached, getActiveAgentRounds } from '../store'
+import { ALL_FAVORITES_COLLECTION_ID, deleteFavoriteCollection, getTaskFavoriteCollectionIds, useStore, submitTask, submitBatchTasks, submitAgentMessage, stopAgentResponse, addImageFromFile, createInputImageFromFile, deleteImageIfUnreferenced, removeMultipleTasks, getCachedImage, ensureImageCached, getActiveAgentRounds, getGalleryBatchRows } from '../store'
 import { DEFAULT_PARAMS, type TaskRecord } from '../types'
 import { getActiveApiProfile, normalizeSettings } from '../lib/apiProfiles'
 import { DEFAULT_FAL_IMAGE_SIZE, getChangedParams, getOutputImageLimitForSettings, normalizeParamsForSettings } from '../lib/paramCompatibility'
@@ -461,6 +461,13 @@ export default function InputBar() {
   const activeFavoriteCollectionId = useStore((s) => s.activeFavoriteCollectionId)
   const openFavoritePicker = useStore((s) => s.openFavoritePicker)
   const searchQuery = useStore((s) => s.searchQuery)
+  const galleryBatchDraft = useStore((s) => s.galleryBatchDraft)
+  const setGalleryBatchEnabled = useStore((s) => s.setGalleryBatchEnabled)
+  const setGalleryBatchVariableCollapsed = useStore((s) => s.setGalleryBatchVariableCollapsed)
+  const addGalleryBatchVariableItem = useStore((s) => s.addGalleryBatchVariableItem)
+  const updateGalleryBatchVariableItemText = useStore((s) => s.updateGalleryBatchVariableItemText)
+  const setGalleryBatchVariableItemCollapsed = useStore((s) => s.setGalleryBatchVariableItemCollapsed)
+  const removeGalleryBatchVariableItem = useStore((s) => s.removeGalleryBatchVariableItem)
 
   const filteredTasks = useMemo(() => {
     const sorted = [...tasks].sort((a, b) => b.createdAt - a.createdAt)
@@ -750,27 +757,47 @@ export default function InputBar() {
     ? agentConversations.find((conversation) => conversation.id === activeAgentConversationId) ?? null
     : null
   const activeAgentIsRunning = Boolean(activeAgentConversation?.rounds.some((round) => round.status === 'running'))
+  const galleryBatchEnabled = appMode === 'gallery' && galleryBatchDraft.enabled
+  const galleryBatchRows = useMemo(() => getGalleryBatchRows(galleryBatchDraft), [galleryBatchDraft])
+  const galleryBatchTaskCount = galleryBatchRows.length
+  const galleryBatchMaskBlocked = galleryBatchEnabled && Boolean(maskDraft)
   const effectiveSettings = useMemo(() => (
     activeProfile.id === currentActiveProfile.id
       ? settings
       : normalizeSettings({ ...settings, activeProfileId: activeProfile.id })
   ), [activeProfile.id, currentActiveProfile.id, settings])
   const hasSubmitApiConfig = Boolean(activeProfile.apiKey)
-  const canSubmit = Boolean(prompt.trim() && hasSubmitApiConfig && !activeAgentIsRunning)
+  const canSubmit = Boolean(
+    hasSubmitApiConfig &&
+    !activeAgentIsRunning &&
+    (galleryBatchEnabled ? galleryBatchTaskCount > 0 && !galleryBatchMaskBlocked : prompt.trim()),
+  )
   const submitButtonAriaLabel = activeAgentIsRunning
     ? '停止生成'
     : hasSubmitApiConfig
-    ? maskDraft ? '遮罩编辑' : '生成图像'
+    ? galleryBatchEnabled ? `生成 ${galleryBatchTaskCount} 个任务` : maskDraft ? '遮罩编辑' : '生成图像'
     : '请先配置 API'
   const submitTooltipText = activeAgentIsRunning ? '停止生成' : '尚未完成 API 配置，请在右上角设置中进行'
-  const promptPlaceholder = '描述你想生成的图片，可输入 @ 来指定参考图...'
+  const submitButtonText = activeAgentIsRunning
+    ? '停止生成'
+    : !hasSubmitApiConfig
+    ? '配置 API'
+    : galleryBatchEnabled
+    ? galleryBatchMaskBlocked ? '遮罩编辑暂不支持批量' : galleryBatchTaskCount > 0 ? `生成 ${galleryBatchTaskCount} 个任务` : '等待变量'
+    : maskDraft ? '遮罩编辑' : '生成图像'
+  const submitTooltip = activeAgentIsRunning
+    ? '停止生成'
+    : !hasSubmitApiConfig ? submitTooltipText : galleryBatchEnabled ? submitButtonText : submitTooltipText
+  const promptPlaceholder = galleryBatchEnabled ? '通用提示词，可输入 @ 来指定全局参考图...' : '描述你想生成的图片，可输入 @ 来指定参考图...'
   const submitCurrentMode = useCallback(() => {
     if (appMode === 'agent') {
       void submitAgentMessage()
+    } else if (galleryBatchDraft.enabled) {
+      void submitBatchTasks()
     } else {
       void submitTask()
     }
-  }, [appMode])
+  }, [appMode, galleryBatchDraft.enabled])
   const stopActiveAgentResponse = useCallback(() => {
     stopAgentResponse(activeAgentConversationId)
   }, [activeAgentConversationId])
@@ -2443,6 +2470,101 @@ export default function InputBar() {
             )}
           </div>
 
+          {galleryBatchEnabled && (
+            <div className="mt-3 space-y-2">
+              {galleryBatchMaskBlocked && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
+                  批量模式暂不支持遮罩编辑
+                </div>
+              )}
+              <div className="rounded-2xl border border-gray-200/60 bg-white/35 dark:border-white/[0.08] dark:bg-white/[0.03]">
+                <div className="flex items-center justify-between gap-2 px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => setGalleryBatchVariableCollapsed(!galleryBatchDraft.variableCollapsed)}
+                    className="flex min-w-0 items-center gap-2 text-left text-xs font-medium text-gray-600 dark:text-gray-300"
+                    aria-expanded={!galleryBatchDraft.variableCollapsed}
+                  >
+                    <svg className={`h-4 w-4 shrink-0 transition-transform ${galleryBatchDraft.variableCollapsed ? '-rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                    <span className="truncate">变量</span>
+                    <span className="shrink-0 text-gray-400 dark:text-gray-500">{galleryBatchTaskCount} 个任务</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={addGalleryBatchVariableItem}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-gray-200 bg-white/70 px-2 py-1 text-xs text-gray-600 transition-colors hover:bg-white dark:border-white/[0.08] dark:bg-white/[0.05] dark:text-gray-300 dark:hover:bg-white/[0.08]"
+                    title="增加变量"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    增加
+                  </button>
+                </div>
+
+                {!galleryBatchDraft.variableCollapsed && (
+                  <div className="space-y-2 border-t border-gray-200/60 p-2 dark:border-white/[0.08]">
+                    {galleryBatchDraft.variableItems.length === 0 && (
+                      <button
+                        type="button"
+                        onClick={addGalleryBatchVariableItem}
+                        className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white/30 px-3 py-4 text-sm text-gray-500 transition-colors hover:bg-white/60 dark:border-white/[0.12] dark:bg-white/[0.02] dark:text-gray-400 dark:hover:bg-white/[0.05]"
+                      >
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        </svg>
+                        增加第一个变量
+                      </button>
+                    )}
+
+                    {galleryBatchDraft.variableItems.map((item, index) => (
+                      <div key={item.id} className="rounded-xl border border-gray-200/60 bg-white/45 p-2 dark:border-white/[0.08] dark:bg-white/[0.03]">
+                        <div className="mb-1.5 flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setGalleryBatchVariableItemCollapsed(item.id, !item.collapsed)}
+                            className="flex min-w-0 items-center gap-1.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400"
+                            aria-expanded={!item.collapsed}
+                          >
+                            <svg className={`h-3.5 w-3.5 shrink-0 transition-transform ${item.collapsed ? '-rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                            <span className="shrink-0">变量 {index + 1}</span>
+                            {item.collapsed && (
+                              <span className="min-w-0 truncate text-gray-400 dark:text-gray-500">
+                                {stripImageMentionMarkers(item.text).trim() || '空变量'}
+                              </span>
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeGalleryBatchVariableItem(item.id)}
+                            className="rounded-full p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.08] dark:hover:text-gray-200"
+                            title="删除变量"
+                            aria-label="删除变量"
+                          >
+                            <CloseIcon className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        {!item.collapsed && (
+                          <textarea
+                            value={item.text}
+                            onChange={(event) => updateGalleryBatchVariableItemText(item.id, event.target.value)}
+                            rows={2}
+                            placeholder={`第 ${index + 1} 个变量提示词`}
+                            className="w-full resize-none rounded-xl border border-gray-200/60 bg-white/50 px-3 py-2 text-sm leading-relaxed text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-100 dark:focus:border-blue-500/50"
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* 参数 + 按钮 */}
           <div className="mt-3">
             {/* 桌面端布局 */}
@@ -2450,6 +2572,25 @@ export default function InputBar() {
               {renderParams('grid-cols-6')}
 
               <div className="flex gap-2 flex-shrink-0 mb-0.5">
+                {appMode === 'gallery' && (
+                  <button
+                    type="button"
+                    onClick={() => setGalleryBatchEnabled(!galleryBatchDraft.enabled)}
+                    className={`p-2.5 rounded-xl transition-all shadow-sm ${
+                      galleryBatchDraft.enabled
+                        ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 dark:bg-blue-500/20 dark:text-blue-200 dark:hover:bg-blue-500/30'
+                        : 'bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300 hover:shadow'
+                    }`}
+                    aria-label="Gallery 批量"
+                    aria-pressed={galleryBatchDraft.enabled}
+                    title="Gallery 批量"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h16M4 12h16M4 17h16" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5v14M16 5v14" />
+                    </svg>
+                  </button>
+                )}
                 <div
                   className="relative"
                   onMouseEnter={() => setAttachHover(true)}
@@ -2475,7 +2616,7 @@ export default function InputBar() {
                   onMouseEnter={() => setSubmitHover(true)}
                   onMouseLeave={() => setSubmitHover(false)}
                 >
-                  <ButtonTooltip visible={(activeAgentIsRunning || !hasSubmitApiConfig) && submitHover} text={submitTooltipText} />
+                  <ButtonTooltip visible={(activeAgentIsRunning || !hasSubmitApiConfig || galleryBatchEnabled) && submitHover} text={submitTooltip} />
                   <button
                     onClick={() => activeAgentIsRunning ? stopActiveAgentResponse() : hasSubmitApiConfig ? submitCurrentMode() : setShowSettings(true)}
                     disabled={activeAgentIsRunning ? false : hasSubmitApiConfig ? !canSubmit : false}
@@ -2512,6 +2653,25 @@ export default function InputBar() {
               </div>
 
               <div className="flex items-center gap-2">
+                {appMode === 'gallery' && (
+                  <button
+                    type="button"
+                    onClick={() => setGalleryBatchEnabled(!galleryBatchDraft.enabled)}
+                    className={`p-2.5 rounded-xl transition-all shadow-sm flex-shrink-0 ${
+                      galleryBatchDraft.enabled
+                        ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 dark:bg-blue-500/20 dark:text-blue-200 dark:hover:bg-blue-500/30'
+                        : 'bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300'
+                    }`}
+                    aria-label="Gallery 批量"
+                    aria-pressed={galleryBatchDraft.enabled}
+                    title="Gallery 批量"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h16M4 12h16M4 17h16" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5v14M16 5v14" />
+                    </svg>
+                  </button>
+                )}
                 <div
                   className="relative"
                   onMouseEnter={() => setAttachHover(true)}
@@ -2582,7 +2742,7 @@ export default function InputBar() {
                   onMouseEnter={() => setSubmitHover(true)}
                   onMouseLeave={() => setSubmitHover(false)}
                 >
-                  <ButtonTooltip visible={(activeAgentIsRunning || !hasSubmitApiConfig) && submitHover} text={submitTooltipText} />
+                  <ButtonTooltip visible={(activeAgentIsRunning || !hasSubmitApiConfig || galleryBatchEnabled) && submitHover} text={submitTooltip} />
                   <button
                     onClick={() => activeAgentIsRunning ? stopActiveAgentResponse() : hasSubmitApiConfig ? submitCurrentMode() : setShowSettings(true)}
                     disabled={activeAgentIsRunning ? false : hasSubmitApiConfig ? !canSubmit : false}
@@ -2604,7 +2764,7 @@ export default function InputBar() {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                       </svg>
                     )}
-                    {activeAgentIsRunning ? '停止生成' : maskDraft ? '遮罩编辑' : '生成图像'}
+                    {submitButtonText}
                   </button>
                 </div>
               </div>

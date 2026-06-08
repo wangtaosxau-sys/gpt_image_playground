@@ -120,10 +120,11 @@ vi.mock('./lib/agentApi', () => ({
   }),
 }))
 import { clearAgentConversations, clearImages, clearTasks, getAllAgentConversations, getAllTasks, getImage, putAgentConversation, putImage, putTask as putDbTask } from './lib/db'
+import { callImageApi } from './lib/api'
 import { callAgentResponsesApi, callBatchImageSingle } from './lib/agentApi'
 import { getFalQueuedImageResult } from './lib/falAiImageApi'
 import { removeKeyedBackgroundFromDataUrl } from './lib/transparentImage'
-import { cleanStaleAgentInputDrafts, clearFailedTasks, deleteAgentRoundFromConversation, deleteFavoriteCollection, editOutputs, getActiveAgentRounds, getErrorToastMessage, getPersistedState, getTaskApiProfile, importData, initStore, markInterruptedOpenAIRunningTasks, migratePersistedState, regenerateAgentAssistantMessage, remapAgentRoundMentionsForPathChange, removeTask, reuseConfig, submitAgentMessage, submitTask, useStore } from './store'
+import { cleanStaleAgentInputDrafts, clearFailedTasks, deleteAgentRoundFromConversation, deleteFavoriteCollection, editOutputs, getActiveAgentRounds, getErrorToastMessage, getGalleryBatchRows, getPersistedState, getTaskApiProfile, importData, initStore, markInterruptedOpenAIRunningTasks, migratePersistedState, regenerateAgentAssistantMessage, remapAgentRoundMentionsForPathChange, removeTask, reuseConfig, submitAgentMessage, submitBatchTasks, submitTask, useStore } from './store'
 
 const imageA = { id: 'image-a', dataUrl: 'data:image/png;base64,a' }
 const imageB = { id: 'image-b', dataUrl: 'data:image/png;base64,b' }
@@ -173,6 +174,12 @@ function importFile(data: ExportData): File {
   const zipped = zipSync({ 'manifest.json': strToU8(JSON.stringify(data)) })
   const buffer = zipped.buffer.slice(zipped.byteOffset, zipped.byteOffset + zipped.byteLength)
   return { arrayBuffer: async () => buffer } as File
+}
+
+async function flushAsyncTasks(times = 5) {
+  for (let i = 0; i < times; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
 }
 
 describe('favorite collection deletion', () => {
@@ -285,6 +292,77 @@ describe('mask draft lifecycle in store actions', () => {
     const state = useStore.getState()
     expect(state.tasks).toHaveLength(1)
     expect(state.showToast).toHaveBeenCalledWith('任务已提交', 'success')
+  })
+
+  it('creates gallery batch tasks from variable rows', async () => {
+    vi.mocked(callImageApi).mockClear()
+    vi.mocked(callImageApi)
+      .mockResolvedValueOnce({
+        images: ['data:image/png;base64,batch-a'],
+        actualParams: {},
+        actualParamsList: [{}],
+        revisedPrompts: [],
+      })
+      .mockResolvedValueOnce({
+        images: ['data:image/png;base64,batch-b'],
+        actualParams: {},
+        actualParamsList: [{}],
+        revisedPrompts: [],
+      })
+    useStore.setState({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        galleryBatchConcurrency: 2,
+      },
+      prompt: '统一风格',
+      galleryBatchDraft: {
+        enabled: true,
+        variableCollapsed: false,
+        variableItems: [
+          { id: 'row-a', text: '红色背包' },
+          { id: 'row-b', text: '蓝色水杯' },
+          { id: 'row-empty', text: '   ' },
+        ],
+      },
+      params: { ...DEFAULT_PARAMS, n: 2 },
+    })
+
+    expect(getGalleryBatchRows(useStore.getState().galleryBatchDraft).map((row) => row.text)).toEqual(['红色背包', '蓝色水杯'])
+
+    await submitBatchTasks()
+    await flushAsyncTasks()
+
+    const state = useStore.getState()
+    expect(state.tasks).toHaveLength(2)
+    expect(state.tasks.map((item) => item.prompt)).toEqual(['统一风格\n\n红色背包', '统一风格\n\n蓝色水杯'])
+    expect(state.tasks.every((item) => item.params.n === 2)).toBe(true)
+    expect(callImageApi).toHaveBeenCalledTimes(2)
+    expect(state.showToast).toHaveBeenCalledWith('已提交 2 个任务，并发 2', 'success')
+    await clearTasks()
+    await clearImages()
+  })
+
+  it('blocks gallery batch tasks while a mask draft is active', async () => {
+    vi.mocked(callImageApi).mockClear()
+    useStore.setState({
+      galleryBatchDraft: {
+        enabled: true,
+        variableCollapsed: false,
+        variableItems: [{ id: 'row-a', text: '红色背包' }],
+      },
+      maskDraft: {
+        targetImageId: imageA.id,
+        maskDataUrl: 'data:image/png;base64,mask',
+        updatedAt: 1,
+      },
+    })
+
+    await submitBatchTasks()
+
+    expect(useStore.getState().tasks).toHaveLength(0)
+    expect(callImageApi).not.toHaveBeenCalled()
+    expect(useStore.getState().showToast).toHaveBeenCalledWith('批量模式暂不支持遮罩编辑', 'error')
   })
 
   it('stores transparent background output after local post-processing', async () => {
