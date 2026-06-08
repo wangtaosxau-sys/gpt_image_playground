@@ -14,6 +14,8 @@ Goal: evaluate whether Wails can host the existing Vite build later, without cha
 
 This PoC does not add a Wails project yet because the local desktop toolchain is not available.
 
+2026-06-08 继续验证后，结论不变：现有 Web build 可以生成，Wails 桌面壳仍被本机 Go/Wails/WebView2 工具链阻塞。
+
 ## Local Environment
 
 OS: Windows 10.0.19045.7184
@@ -33,6 +35,7 @@ WebView2: not detected by the local directory and registry probes used in this c
 ```cmd
 cmd.exe /c node --version
 cmd.exe /c npm.cmd --version
+cmd.exe /c npm.cmd run build
 cmd.exe /c go version
 cmd.exe /c wails version
 cmd.exe /c wails doctor
@@ -44,6 +47,7 @@ cmd.exe /c reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3
 
 Results:
 
+- `npm.cmd run build` passed and produced the Vite `dist/` output.
 - `go version` failed because `go` is not recognized.
 - `wails version`, `wails doctor`, `wails dev`, and `wails build` failed because `wails` is not recognized.
 - The WebView2 directory probe did not find the target path.
