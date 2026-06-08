@@ -10,125 +10,130 @@ Base commit: `63770dd`
 
 Date: `2026-06-08`
 
-Goal: evaluate whether Wails can host the existing Vite build later, without changing the Web mainline.
-
-This PoC does not add a Wails project yet because the local Go/Wails toolchain is not available.
-
-2026-06-08 继续验证后，现有 Web build 可以生成，WebView2 Runtime 已在本机检测到；Wails 桌面壳仍被 Go/Wails 工具链阻塞。
+Goal: evaluate whether Wails can host the existing Vite build without changing the Web mainline.
 
 ## Local Environment
 
-OS: Windows 10.0.19045.7184
+OS: Windows 10 Pro for Workstations 22H2, build `19045`
 
 Node: `v24.12.0`
 
 npm: `11.6.2`
 
-Go: not found in `PATH`
+Go: `go1.26.4 windows/amd64`
 
-Wails CLI: not found in `PATH`
+Wails CLI: `v2.12.0`
 
-WebView2: detected at `C:\Program Files (x86)\Microsoft\EdgeWebView\Application\148.0.3967.96`
+WebView2 Runtime: `149.0.4022.52`
+
+Current-shell note: the user PATH was updated, but existing terminals may still need an explicit PATH prefix for `%ProgramFiles%\Go\bin` and `%USERPROFILE%\go\bin` until reopened.
+
+## Toolchain Setup
+
+Chocolatey was used to install Go and WebView2 Runtime from an elevated shell.
+
+Wails CLI was installed with:
+
+```cmd
+go install github.com/wailsapp/wails/v2/cmd/wails@latest
+```
+
+The system check passed:
+
+```cmd
+wails doctor
+```
+
+Result: `SUCCESS Your system is ready for Wails development!`
+
+## PoC Structure
+
+The Wails project is isolated under:
+
+```text
+desktop-wails/
+```
+
+This avoids overwriting or coupling the Web root files:
+
+- `package.json`
+- `package-lock.json`
+- `src/`
+- `public/`
+- `vite.config.ts`
+- `index.html`
+
+The desktop PoC does not own a separate frontend. It builds the root Web app, copies `dist/` into `desktop-wails/frontend/dist`, and embeds that generated directory.
+
+Generated outputs are ignored:
+
+- `desktop-wails/frontend/dist`
+- `desktop-wails/wailsjs`
+- `desktop-wails/build/bin`
 
 ## Commands Run
 
 ```cmd
-cmd.exe /c node --version
-cmd.exe /c npm.cmd --version
+cmd.exe /c "%ProgramFiles%\Go\bin\go.exe" version
+cmd.exe /c "%USERPROFILE%\go\bin\wails.exe" version
+cmd.exe /c "%USERPROFILE%\go\bin\wails.exe" doctor
 cmd.exe /c npm.cmd run build
-cmd.exe /c go version
-cmd.exe /c wails version
-cmd.exe /c wails doctor
-cmd.exe /c wails dev
-cmd.exe /c wails build
-cmd.exe /c choco install golang webview2-runtime -y
-cmd.exe /c dir "%ProgramFiles(x86)%\Microsoft\EdgeWebView\Application"
-cmd.exe /c reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9C2BB04}" /v pv
+cmd.exe /c node desktop-wails\scripts\build-web-assets.mjs
+cmd.exe /c "cd desktop-wails && wails build -clean -nopackage -nocolour"
 ```
 
 Results:
 
-- `npm.cmd run build` passed and produced the Vite `dist/` output.
-- `go version` failed because `go` is not recognized.
-- `wails version`, `wails doctor`, `wails dev`, and `wails build` failed because `wails` is not recognized.
-- `choco install golang webview2-runtime -y` failed because the shell was not elevated and Chocolatey could not write under `C:\ProgramData\chocolatey`.
-- The WebView2 directory probe found `148.0.3967.96`.
-- The WebView2 registry probe did not find the target key or value.
-- `%USERPROFILE%\go\bin` was added to the current user `Path` for the future Wails CLI install location.
+- `go version` reported `go1.26.4 windows/amd64`.
+- `wails version` reported `v2.12.0`.
+- `wails doctor` passed and detected WebView2 `149.0.4022.52`.
+- Root Web build passed.
+- `desktop-wails/scripts/build-web-assets.mjs` built the root Web app and synced it into `desktop-wails/frontend/dist`.
+- `wails build -clean -nopackage -nocolour` passed.
+
+Build output:
+
+```text
+desktop-wails/build/bin/gpt-image-playground-desktop.exe
+```
+
+Observed size: `40,900,608` bytes.
+
+## Dev Mode Attempt
+
+`wails dev -s -assetdir ..\dist -nocolour` was attempted as a limited smoke check.
+
+The command did not return logs before the 45 second timeout, so it is not counted as a passed dev-mode verification. The remaining `wails.exe` process from that attempt was terminated.
 
 ## Status
 
-Status: `BLOCKED_TOOLCHAIN`
+Status: `BUILD_READY`
 
-Blocked by:
+Desktop feasibility result:
 
-- Go is not installed or not in `PATH`.
-- Wails CLI is not installed or not in `PATH`.
-- Chocolatey install requires an elevated shell for this machine.
+- Wails toolchain is available.
+- Wails can build a Windows desktop executable from the current Vite app output.
+- The Web mainline does not need Wails dependencies.
 
-Decision: do not scaffold Wails files on this branch until `wails doctor` can run.
+Not production-ready yet:
 
-## Official References
-
-- Wails installation: https://wails.io/docs/gettingstarted/installation
-- Wails CLI reference: https://wails.io/docs/v2.9.0/reference/cli
-- Wails development command: https://wails.io/docs/v2.11.0/gettingstarted/development
-- Wails build command: https://wails.io/docs/gettingstarted/building
-
-The Wails installation guide lists Go and npm as common dependencies, Windows WebView2 as a platform dependency, `go install github.com/wailsapp/wails/v2/cmd/wails@latest` as the CLI installation command, and `wails doctor` as the system check.
-
-## Files Policy
-
-Files that may exist only on a future Wails PoC branch:
-
-- `wails.json`
-- `go.mod`
-- `go.sum`
-- `main.go`
-- `app.go`
-- `build/**`
-- `wailsjs/**`
-- Wails-only package scripts, if needed for the PoC
-
-Files that should not be merged into the Web mainline:
-
-- Wails Go backend files
-- generated Wails bindings
-- desktop installer output
-- package scripts that make Web build or tests depend on Go, Wails, or WebView2
-- any direct import of Wails runtime from shared Web code
-
-Files that are safe to carry back later:
-
-- docs that describe desktop boundaries and validation results
-- platform-neutral notes for a future `runtimeHost` boundary
+- No installer configuration has been finalized.
+- No Wails runtime host boundary has been added.
+- No desktop credential store, file picker, notification, or native download adapter has been designed.
+- `wails dev` still needs an interactive manual run after reopening the terminal so PATH refreshes normally.
 
 ## Next Action
 
-Install and verify the local toolchain:
+Manual checks:
 
 ```cmd
-choco install golang -y
-go version
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
-wails version
-wails doctor
+cd desktop-wails
+wails dev -s -assetdir ..\dist -nocolour
+build\bin\gpt-image-playground-desktop.exe
 ```
 
-After `wails doctor` passes, create a new Wails PoC branch from the current Web/PWA branch and validate:
+Engineering follow-up:
 
-```cmd
-npm.cmd run test
-npm.cmd run build
-node scripts/local-smoke-check.mjs
-git diff --check
-wails dev
-wails build
-```
-
-Acceptance criteria:
-
-- Web tests and build remain independent from Wails.
-- The desktop shell loads the same Vite build output.
-- No private endpoint, credential, or local-only provider default is added.
-- No Wails-specific code lands in the shared Web runtime without a platform boundary.
+- Define a `runtimeHost` boundary before adding desktop-only behavior.
+- Keep Go/Wails code out of the Web mainline.
+- Decide whether the first distributable should be a portable exe or an NSIS installer.

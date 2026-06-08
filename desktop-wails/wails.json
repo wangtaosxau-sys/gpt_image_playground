@@ -1,0 +1,12 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "gpt-image-playground-desktop",
+  "outputfilename": "gpt-image-playground-desktop",
+  "frontend:build": "node ../scripts/build-web-assets.mjs",
+  "frontend:dev:build": "node ../scripts/build-web-assets.mjs",
+  "wailsjsdir": "./wailsjs",
+  "author": {
+    "name": "wangtaosxau-sys",
+    "email": "wangtaosxau@gmail.com"
+  }
+}
