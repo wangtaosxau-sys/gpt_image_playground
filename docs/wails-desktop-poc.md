@@ -12,9 +12,9 @@ Date: `2026-06-08`
 
 Goal: evaluate whether Wails can host the existing Vite build later, without changing the Web mainline.
 
-This PoC does not add a Wails project yet because the local desktop toolchain is not available.
+This PoC does not add a Wails project yet because the local Go/Wails toolchain is not available.
 
-2026-06-08 继续验证后，结论不变：现有 Web build 可以生成，Wails 桌面壳仍被本机 Go/Wails/WebView2 工具链阻塞。
+2026-06-08 继续验证后，现有 Web build 可以生成，WebView2 Runtime 已在本机检测到；Wails 桌面壳仍被 Go/Wails 工具链阻塞。
 
 ## Local Environment
 
@@ -28,7 +28,7 @@ Go: not found in `PATH`
 
 Wails CLI: not found in `PATH`
 
-WebView2: not detected by the local directory and registry probes used in this check. The final source of truth should be `wails doctor` after Wails is installed.
+WebView2: detected at `C:\Program Files (x86)\Microsoft\EdgeWebView\Application\148.0.3967.96`
 
 ## Commands Run
 
@@ -41,6 +41,7 @@ cmd.exe /c wails version
 cmd.exe /c wails doctor
 cmd.exe /c wails dev
 cmd.exe /c wails build
+cmd.exe /c choco install golang webview2-runtime -y
 cmd.exe /c dir "%ProgramFiles(x86)%\Microsoft\EdgeWebView\Application"
 cmd.exe /c reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9C2BB04}" /v pv
 ```
@@ -50,8 +51,10 @@ Results:
 - `npm.cmd run build` passed and produced the Vite `dist/` output.
 - `go version` failed because `go` is not recognized.
 - `wails version`, `wails doctor`, `wails dev`, and `wails build` failed because `wails` is not recognized.
-- The WebView2 directory probe did not find the target path.
+- `choco install golang webview2-runtime -y` failed because the shell was not elevated and Chocolatey could not write under `C:\ProgramData\chocolatey`.
+- The WebView2 directory probe found `148.0.3967.96`.
 - The WebView2 registry probe did not find the target key or value.
+- `%USERPROFILE%\go\bin` was added to the current user `Path` for the future Wails CLI install location.
 
 ## Status
 
@@ -61,7 +64,7 @@ Blocked by:
 
 - Go is not installed or not in `PATH`.
 - Wails CLI is not installed or not in `PATH`.
-- WebView2 was not detected by the local probes.
+- Chocolatey install requires an elevated shell for this machine.
 
 Decision: do not scaffold Wails files on this branch until `wails doctor` can run.
 
@@ -105,6 +108,7 @@ Files that are safe to carry back later:
 Install and verify the local toolchain:
 
 ```cmd
+choco install golang -y
 go version
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
 wails version
