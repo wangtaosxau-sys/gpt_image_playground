@@ -365,6 +365,33 @@ describe('mask draft lifecycle in store actions', () => {
     expect(useStore.getState().showToast).toHaveBeenCalledWith('批量模式暂不支持遮罩编辑', 'error')
   })
 
+  it('blocks gallery batch tasks when the browser is offline', async () => {
+    vi.mocked(callImageApi).mockClear()
+    const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: { onLine: false },
+    })
+    useStore.setState({
+      galleryBatchDraft: {
+        enabled: true,
+        variableCollapsed: false,
+        variableItems: [{ id: 'row-a', text: '红色背包' }],
+      },
+    })
+
+    try {
+      await submitBatchTasks()
+
+      expect(useStore.getState().tasks).toHaveLength(0)
+      expect(callImageApi).not.toHaveBeenCalled()
+      expect(useStore.getState().showToast).toHaveBeenCalledWith('当前离线，不能生成新图', 'error')
+    } finally {
+      if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor)
+      else delete (globalThis as { navigator?: Navigator }).navigator
+    }
+  })
+
   it('stores transparent background output after local post-processing', async () => {
     const { callImageApi } = await import('./lib/api')
     vi.mocked(callImageApi).mockClear()

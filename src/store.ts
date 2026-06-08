@@ -101,6 +101,16 @@ type AgentInputDraft = {
   updatedAt?: number
 }
 
+function isBrowserOffline() {
+  return typeof navigator !== 'undefined' && navigator.onLine === false
+}
+
+function blockGenerationWhenOffline(showToast: (message: string, type?: ToastType) => void) {
+  if (!isBrowserOffline()) return false
+  showToast('当前离线，不能生成新图', 'error')
+  return true
+}
+
 export function getErrorToastMessage(message: string): string {
   const text = message.trim()
   if (!text) return '操作失败'
@@ -2321,6 +2331,8 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
   const { settings, prompt, inputImages, maskDraft, params, reusedTaskApiProfileId, reusedTaskApiProfileName, reusedTaskApiProfileMissing, showToast, setConfirmDialog } =
     useStore.getState()
 
+  if (blockGenerationWhenOffline(showToast)) return
+
   const normalizedSettings = normalizeSettings(settings)
   let activeProfile = getActiveApiProfile(settings)
   let requestSettings = createSettingsForApiProfile(normalizedSettings, activeProfile)
@@ -2499,6 +2511,8 @@ export async function submitBatchTasks(options: { useCurrentApiProfileWhenReused
     showToast('请增加变量并填写内容', 'error')
     return
   }
+
+  if (blockGenerationWhenOffline(showToast)) return
 
   const normalizedSettings = normalizeSettings(settings)
   let activeProfile = getActiveApiProfile(settings)
@@ -3356,6 +3370,8 @@ export async function submitAgentMessage() {
     state.setAppMode('agent')
     return
   }
+
+  if (blockGenerationWhenOffline(showToast)) return
 
   if (validateApiProfile(activeProfile)) {
     showToast(`请先完善请求 API 配置：${validateApiProfile(activeProfile)}`, 'error')

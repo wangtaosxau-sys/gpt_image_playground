@@ -1,5 +1,28 @@
-const CACHE_NAME = 'gpt-image-playground-v0.1.5'
-const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './pwa-icon.svg']
+const CACHE_NAME = 'gpt-image-playground-v0.6.0'
+const APP_SHELL = [
+  './',
+  './index.html',
+  './manifest.webmanifest',
+  './pwa-icon.svg',
+  './pwa-icon-180.png',
+  './pwa-icon-192.png',
+  './pwa-icon-512.png',
+  './pwa-maskable-512.png',
+]
+const INDEX_URL = new URL('./index.html', self.registration.scope).href
+const APP_SHELL_URLS = new Set(APP_SHELL.map((path) => new URL(path, self.registration.scope).href))
+const STATIC_ASSET_RE = /\/assets\/.+\.(?:css|js|mjs|png|jpe?g|webp|svg|woff2?)$/i
+
+function isApiProxyRequest(url) {
+  return url.pathname.includes('/api-proxy/')
+}
+
+function isCacheableStaticRequest(request, url) {
+  if (isApiProxyRequest(url)) return false
+  if (APP_SHELL_URLS.has(url.href)) return true
+  if (STATIC_ASSET_RE.test(url.pathname)) return true
+  return request.destination === 'style' || request.destination === 'script' || request.destination === 'font'
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -24,26 +47,29 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
+  if (isApiProxyRequest(url)) return
 
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
         .then((response) => {
           const copy = response.clone()
-          caches.open(CACHE_NAME).then((cache) => cache.put('./index.html', copy))
+          caches.open(CACHE_NAME).then((cache) => cache.put(INDEX_URL, copy))
           return response
         })
-        .catch(() => caches.match('./index.html')),
+        .catch(() => caches.match(INDEX_URL)),
     )
     return
   }
+
+  if (!isCacheableStaticRequest(request, url)) return
 
   event.respondWith(
     caches.match(request).then((cached) => {
       if (cached) return cached
 
       return fetch(request).then((response) => {
-        if (response.ok) {
+        if (response.ok && response.type === 'basic') {
           const copy = response.clone()
           caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
         }

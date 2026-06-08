@@ -25,6 +25,7 @@ let customProviderConfigUrlImportStarted = false
 
 export default function App() {
   const setSettings = useStore((s) => s.setSettings)
+  const showToast = useStore((s) => s.showToast)
   const appMode = useStore((s) => s.appMode)
   const filterFavorite = useStore((s) => s.filterFavorite)
   const activeFavoriteCollectionId = useStore((s) => s.activeFavoriteCollectionId)
@@ -72,6 +73,20 @@ export default function App() {
     document.addEventListener('dragstart', preventPageImageDrag)
     return () => document.removeEventListener('dragstart', preventPageImageDrag)
   }, [])
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('onLine' in navigator)) return
+
+    const handleOffline = () => showToast('当前离线，只能查看已有内容，不能生成新图', 'error')
+    const handleOnline = () => showToast('网络已恢复', 'success')
+
+    window.addEventListener('offline', handleOffline)
+    window.addEventListener('online', handleOnline)
+    return () => {
+      window.removeEventListener('offline', handleOffline)
+      window.removeEventListener('online', handleOnline)
+    }
+  }, [showToast])
 
   return (
     <>
