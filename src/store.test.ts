@@ -343,6 +343,131 @@ describe('mask draft lifecycle in store actions', () => {
     await clearImages()
   })
 
+  it('creates gallery batch tasks from variable-only rows', async () => {
+    vi.mocked(callImageApi).mockClear()
+    vi.mocked(callImageApi).mockResolvedValueOnce({
+      images: ['data:image/png;base64,batch-variable-only'],
+      actualParams: {},
+      actualParamsList: [{}],
+      revisedPrompts: [],
+    })
+    useStore.setState({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+      },
+      prompt: '',
+      galleryBatchDraft: {
+        enabled: true,
+        variableCollapsed: false,
+        variableItems: [{ id: 'row-a', text: '纯变量提示' }],
+      },
+    })
+
+    await submitBatchTasks()
+    await flushAsyncTasks()
+
+    const state = useStore.getState()
+    expect(state.tasks).toHaveLength(1)
+    expect(state.tasks[0].prompt).toBe('纯变量提示')
+    expect(callImageApi).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: '纯变量提示',
+    }))
+    expect(state.showToast).toHaveBeenCalledWith('已提交 1 个任务，并发 3', 'success')
+    await clearTasks()
+    await clearImages()
+  })
+
+  it('blocks gallery batch tasks when every variable row is empty', async () => {
+    vi.mocked(callImageApi).mockClear()
+    useStore.setState({
+      galleryBatchDraft: {
+        enabled: true,
+        variableCollapsed: false,
+        variableItems: [
+          { id: 'row-a', text: '   ' },
+          { id: 'row-b', text: '\n\t' },
+        ],
+      },
+    })
+
+    await submitBatchTasks()
+
+    expect(useStore.getState().tasks).toHaveLength(0)
+    expect(callImageApi).not.toHaveBeenCalled()
+    expect(useStore.getState().showToast).toHaveBeenCalledWith('请增加变量并填写内容', 'error')
+  })
+
+  it('runs gallery batch tasks according to the configured concurrency', async () => {
+    vi.mocked(callImageApi).mockClear()
+    let activeCalls = 0
+    let maxActiveCalls = 0
+    vi.mocked(callImageApi).mockImplementation(async (opts) => {
+      activeCalls += 1
+      maxActiveCalls = Math.max(maxActiveCalls, activeCalls)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      activeCalls -= 1
+      return {
+        images: [`data:image/png;base64,${opts.prompt}`],
+        actualParams: {},
+        actualParamsList: [{}],
+        revisedPrompts: [],
+      }
+    })
+    useStore.setState({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        galleryBatchConcurrency: 1,
+      },
+      galleryBatchDraft: {
+        enabled: true,
+        variableCollapsed: false,
+        variableItems: [
+          { id: 'row-a', text: 'A' },
+          { id: 'row-b', text: 'B' },
+          { id: 'row-c', text: 'C' },
+        ],
+      },
+    })
+
+    await submitBatchTasks()
+    await flushAsyncTasks(10)
+
+    expect(callImageApi).toHaveBeenCalledTimes(3)
+    expect(maxActiveCalls).toBe(1)
+    expect(useStore.getState().showToast).toHaveBeenCalledWith('已提交 3 个任务，并发 1', 'success')
+
+    vi.mocked(callImageApi).mockClear()
+    activeCalls = 0
+    maxActiveCalls = 0
+    await clearTasks()
+    useStore.setState({
+      settings: {
+        ...useStore.getState().settings,
+        galleryBatchConcurrency: 3,
+      },
+      galleryBatchDraft: {
+        enabled: true,
+        variableCollapsed: false,
+        variableItems: [
+          { id: 'row-a', text: 'A' },
+          { id: 'row-b', text: 'B' },
+          { id: 'row-c', text: 'C' },
+        ],
+      },
+    })
+
+    await submitBatchTasks()
+    await flushAsyncTasks(10)
+
+    expect(callImageApi).toHaveBeenCalledTimes(3)
+    expect(maxActiveCalls).toBe(3)
+    expect(useStore.getState().showToast).toHaveBeenCalledWith('已提交 3 个任务，并发 3', 'success')
+    await clearTasks()
+    await clearImages()
+  })
+
   it('blocks gallery batch tasks while a mask draft is active', async () => {
     vi.mocked(callImageApi).mockClear()
     useStore.setState({
