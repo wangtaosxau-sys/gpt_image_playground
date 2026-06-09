@@ -438,7 +438,7 @@ export default function PromptLibraryView() {
             没有找到提示词
           </div>
         ) : (
-          <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+          <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
             {visibleItems.map((item) => {
               const hasImages = item.imageIds.length > 0
               const primaryImageId = item.coverImageId ?? item.imageIds[0]
@@ -465,12 +465,12 @@ export default function PromptLibraryView() {
                         event.stopPropagation()
                         useStore.getState().setLightboxImageId(primaryImageId, item.imageIds)
                       }}
-                      className="relative block aspect-[4/3] w-full overflow-hidden bg-gray-100 dark:bg-black/20"
+                      className="relative block aspect-[4/3] w-full overflow-hidden bg-gray-100 dark:bg-gray-800"
                       aria-label="查看参考图"
                     >
                       <PromptThumbnail imageId={primaryImageId} />
                       {item.imageIds.length > 1 && (
-                        <span className="absolute right-3 top-3 rounded-full bg-black/60 px-2 py-1 text-xs text-white backdrop-blur">{item.imageIds.length} 图</span>
+                        <span className="absolute right-3 top-3 rounded-full bg-gray-900/70 px-2 py-1 text-xs text-white backdrop-blur">{item.imageIds.length} 图</span>
                       )}
                     </button>
                   )}
