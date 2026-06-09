@@ -382,6 +382,53 @@ describe('prompt library', () => {
     expect(useStore.getState().prompt).toBe('干净产品图')
   })
 
+  it('uses prompt library images as gallery references without changing prompt or batch variables', async () => {
+    await putImage({ id: imageA.id, dataUrl: imageA.dataUrl, source: 'generated', createdAt: 1 })
+    await putImage({ id: imageB.id, dataUrl: imageB.dataUrl, source: 'generated', createdAt: 2 })
+    const item = await useStore.getState().createPromptLibraryItem({
+      title: 'Reference set',
+      prompt: 'reference prompt',
+      category: 'Refs',
+      tags: [],
+      imageIds: [imageA.id, imageB.id],
+      coverImageId: imageA.id,
+      source: 'user',
+    })
+    useStore.setState({
+      appMode: 'prompts',
+      prompt: 'keep current prompt',
+      inputImages: [],
+      maskDraft: { targetImageId: imageA.id, maskDataUrl: 'data:image/png;base64,mask', updatedAt: 1 },
+    })
+    const previousBatch = useStore.getState().galleryBatchDraft
+
+    await useStore.getState().usePromptLibraryItemImages(item!.id)
+
+    const state = useStore.getState()
+    expect(state.appMode).toBe('gallery')
+    expect(state.prompt).toBe('keep current prompt')
+    expect(state.inputImages.map((image) => image.id)).toEqual([imageA.id, imageB.id])
+    expect(state.maskDraft).toBeNull()
+    expect(state.galleryBatchDraft).toEqual(previousBatch)
+    expect(state.promptLibraryItems.find((entry) => entry.id === item!.id)?.useCount).toBe(0)
+  })
+
+  it('does not change gallery references when a prompt library item has no images', async () => {
+    const item = await useStore.getState().createPromptLibraryItem({
+      title: 'No refs',
+      prompt: 'text only',
+      category: 'Text',
+      tags: [],
+      source: 'user',
+    })
+    useStore.setState({ inputImages: [{ id: imageA.id, dataUrl: imageA.dataUrl }] })
+
+    await useStore.getState().usePromptLibraryItemImages(item!.id)
+
+    expect(useStore.getState().inputImages).toEqual([{ id: imageA.id, dataUrl: imageA.dataUrl }])
+    expect(useStore.getState().showToast).toHaveBeenCalledWith('这条提示词没有关联参考图', 'error')
+  })
+
   it('keeps prompt library images when deleting their source task', async () => {
     await putImage({ id: imageA.id, dataUrl: imageA.dataUrl, source: 'generated', createdAt: 1 })
     const sourceTask = task({ id: 'task-source', prompt: '提示词', outputImages: [imageA.id] })

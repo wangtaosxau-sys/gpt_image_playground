@@ -13,12 +13,15 @@ type PromptFormState = {
   notes: string
 }
 
+const ALL_FILTER = '__all__'
+const UNCATEGORIZED = '未分类'
+
 function createEmptyFormState(): PromptFormState {
   return {
     title: '',
     description: '',
     prompt: '',
-    category: '未分类',
+    category: UNCATEGORIZED,
     tags: '',
     notes: '',
   }
@@ -60,7 +63,7 @@ function PromptThumbnail({ imageId, className = '' }: { imageId?: string; classN
 
   if (src) return <img src={src} alt="" className={`h-full w-full object-cover ${className}`} />
   return (
-    <div className={`flex h-full w-full items-center justify-center bg-gray-100 text-gray-300 dark:bg-white/[0.04] dark:text-gray-600 ${className}`}>
+    <div className={`flex h-full w-full items-center justify-center bg-zinc-900 text-zinc-600 ${className}`}>
       <PhotoIcon className="h-8 w-8" />
     </div>
   )
@@ -95,63 +98,63 @@ function PromptEditor({
     >
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">标题</span>
+          <span className="mb-1 block text-xs font-medium text-zinc-500">标题</span>
           <input
             value={draft.title}
             onChange={(event) => update({ title: event.target.value })}
-            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-blue-400 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white"
+            className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-zinc-500"
           />
         </label>
         <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">分类</span>
+          <span className="mb-1 block text-xs font-medium text-zinc-500">文件夹</span>
           <input
             value={draft.category}
             onChange={(event) => update({ category: event.target.value })}
-            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-blue-400 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white"
+            className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-zinc-500"
           />
         </label>
       </div>
       <label className="block">
-        <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">描述</span>
+        <span className="mb-1 block text-xs font-medium text-zinc-500">描述</span>
         <input
           value={draft.description}
           onChange={(event) => update({ description: event.target.value })}
-          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-blue-400 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white"
+          className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-zinc-500"
         />
       </label>
       <label className="block">
-        <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">提示词</span>
+        <span className="mb-1 block text-xs font-medium text-zinc-500">提示词</span>
         <textarea
           value={draft.prompt}
           onChange={(event) => update({ prompt: event.target.value })}
           rows={5}
-          className="w-full resize-y rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm leading-relaxed text-gray-900 outline-none transition focus:border-blue-400 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white"
+          className="w-full resize-y rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm leading-relaxed text-zinc-100 outline-none transition focus:border-zinc-500"
           required
         />
       </label>
       <label className="block">
-        <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">标签</span>
+        <span className="mb-1 block text-xs font-medium text-zinc-500">标签</span>
         <input
           value={draft.tags}
           onChange={(event) => update({ tags: event.target.value })}
           placeholder="用逗号分隔"
-          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-blue-400 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white"
+          className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-zinc-500"
         />
       </label>
       <label className="block">
-        <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">备注</span>
+        <span className="mb-1 block text-xs font-medium text-zinc-500">备注</span>
         <textarea
           value={draft.notes}
           onChange={(event) => update({ notes: event.target.value })}
           rows={3}
-          className="w-full resize-y rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm leading-relaxed text-gray-900 outline-none transition focus:border-blue-400 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white"
+          className="w-full resize-y rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm leading-relaxed text-zinc-100 outline-none transition focus:border-zinc-500"
         />
       </label>
       <div className="flex flex-wrap justify-end gap-2">
-        <button type="button" onClick={onCancel} className="rounded-lg px-3 py-2 text-sm font-medium text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-white/[0.06]">
+        <button type="button" onClick={onCancel} className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100">
           取消
         </button>
-        <button type="submit" className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:bg-white dark:text-gray-950 dark:hover:bg-gray-200">
+        <button type="submit" className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-white">
           {submitLabel}
         </button>
       </div>
@@ -159,9 +162,55 @@ function PromptEditor({
   )
 }
 
-function formatTime(ts?: number) {
+function formatRelativeTime(ts?: number) {
   if (!ts) return ''
-  return new Date(ts).toLocaleDateString('zh-CN')
+  const diffMs = Math.max(0, Date.now() - ts)
+  const dayMs = 24 * 60 * 60 * 1000
+  const days = Math.floor(diffMs / dayMs)
+  if (days <= 0) return '今天'
+  if (days < 30) return `${days} 天前`
+  if (days < 365) return `大约 ${Math.max(1, Math.floor(days / 30))} 个月前`
+  return `${Math.max(1, Math.floor(days / 365))} 年前`
+}
+
+function getItemHeightClass(item: PromptLibraryItem) {
+  if (item.imageIds.length > 1) return 'break-inside-avoid'
+  if (item.imageIds.length === 1) return 'break-inside-avoid'
+  return 'break-inside-avoid'
+}
+
+function getItemImageClass(item: PromptLibraryItem) {
+  if (item.imageIds.length === 0) return ''
+  if (item.prompt.length > 90) return 'h-60'
+  return 'h-72'
+}
+
+function ActionButton({
+  label,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string
+  disabled?: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={(event) => {
+        event.stopPropagation()
+        onClick()
+      }}
+      className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-black/55 text-zinc-100 backdrop-blur transition hover:bg-zinc-100 hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {children}
+    </button>
+  )
 }
 
 export default function PromptLibraryView() {
@@ -170,25 +219,50 @@ export default function PromptLibraryView() {
   const updatePromptLibraryItem = useStore((s) => s.updatePromptLibraryItem)
   const deletePromptLibraryItem = useStore((s) => s.deletePromptLibraryItem)
   const usePromptLibraryItem = useStore((s) => s.usePromptLibraryItem)
+  const usePromptLibraryItemImages = useStore((s) => s.usePromptLibraryItemImages)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const showToast = useStore((s) => s.showToast)
   const [query, setQuery] = useState('')
+  const [activeFolder, setActiveFolder] = useState(ALL_FILTER)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  const [hoveredItemId, setHoveredItemId] = useState<string | null>(null)
+
+  const activeItems = useMemo(() => promptLibraryItems.filter((item) => !item.isArchived), [promptLibraryItems])
+
+  const folders = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const item of activeItems) counts.set(item.category || UNCATEGORIZED, (counts.get(item.category || UNCATEGORIZED) ?? 0) + 1)
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-CN'))
+      .slice(0, 12)
+  }, [activeItems])
+
+  const tags = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const item of activeItems) {
+      for (const tag of item.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-CN'))
+      .slice(0, 18)
+  }, [activeItems])
 
   const visibleItems = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const activeItems = promptLibraryItems.filter((item) => !item.isArchived)
-    if (!q) return activeItems
-    return activeItems.filter((item) => [
-      item.title,
-      item.description ?? '',
-      item.prompt,
-      item.category,
-      item.tags.join(' '),
-    ].join(' ').toLowerCase().includes(q))
-  }, [promptLibraryItems, query])
+    return activeItems.filter((item) => {
+      if (activeFolder !== ALL_FILTER && item.category !== activeFolder && !item.tags.includes(activeFolder)) return false
+      if (!q) return true
+      return [
+        item.title,
+        item.description ?? '',
+        item.prompt,
+        item.category,
+        item.tags.join(' '),
+      ].join(' ').toLowerCase().includes(q)
+    })
+  }, [activeFolder, activeItems, query])
 
   const selectedItem = useMemo(() => {
     if (!visibleItems.length) return null
@@ -203,14 +277,12 @@ export default function PromptLibraryView() {
     if (selectedItem.id !== selectedId) setSelectedId(selectedItem.id)
   }, [selectedId, selectedItem])
 
-  const categories = useMemo(() => Array.from(new Set(promptLibraryItems.map((item) => item.category))).filter(Boolean).slice(0, 8), [promptLibraryItems])
-
   const handleCreate = async (state: PromptFormState) => {
     const item = await createPromptLibraryItem({
       title: state.title,
       description: state.description,
       prompt: state.prompt,
-      category: state.category || '未分类',
+      category: state.category || UNCATEGORIZED,
       tags: parseTags(state.tags),
       notes: state.notes,
       source: 'user',
@@ -218,6 +290,7 @@ export default function PromptLibraryView() {
     if (item) {
       setSelectedId(item.id)
       setCreating(false)
+      setActiveFolder(item.category)
     }
   }
 
@@ -226,11 +299,12 @@ export default function PromptLibraryView() {
       title: state.title,
       description: state.description,
       prompt: state.prompt,
-      category: state.category || '未分类',
+      category: state.category || UNCATEGORIZED,
       tags: parseTags(state.tags),
       notes: state.notes,
     })
     setEditingId(null)
+    setActiveFolder(state.category || UNCATEGORIZED)
   }
 
   const handleDelete = (item: PromptLibraryItem) => {
@@ -254,196 +328,219 @@ export default function PromptLibraryView() {
     }
   }
 
+  const handleUseImages = (item: PromptLibraryItem) => {
+    void usePromptLibraryItemImages(item.id)
+  }
+
+  const handleUsePrompt = (item: PromptLibraryItem) => {
+    usePromptLibraryItem(item.id)
+  }
+
   const editingItem = editingId ? promptLibraryItems.find((item) => item.id === editingId) ?? null : null
 
   return (
-    <main className="safe-area-x mx-auto max-w-7xl pb-12">
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">提示词图库</h2>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">保存好用的提示词和生成样图，使用时回填到 Gallery。</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            setCreating(true)
-            setEditingId(null)
-          }}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-800 dark:bg-white dark:text-gray-950 dark:hover:bg-gray-200"
-        >
-          <PlusIcon className="h-4 w-4" />
-          新建提示词
-        </button>
-      </div>
-
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row">
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="搜索标题、提示词、标签、分类"
-          className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-blue-400 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white"
-        />
-        {categories.length > 0 && (
-          <div className="flex max-w-full gap-2 overflow-x-auto pb-1 sm:max-w-[42%]">
-            {categories.map((category) => (
-              <button
-                key={category}
-                type="button"
-                onClick={() => setQuery(category)}
-                className="shrink-0 rounded-full border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-500 transition hover:border-gray-300 hover:text-gray-800 dark:border-white/[0.08] dark:text-gray-400 dark:hover:text-gray-200"
-              >
-                {category}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {creating && (
-        <section className="mb-5 rounded-xl border border-gray-200 bg-white p-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
-          <div className="mb-3 text-sm font-semibold text-gray-900 dark:text-white">新建提示词</div>
-          <PromptEditor
-            initial={createEmptyFormState()}
-            submitLabel="保存"
-            onCancel={() => setCreating(false)}
-            onSubmit={(state) => void handleCreate(state)}
-          />
-        </section>
-      )}
-
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(360px,1.1fr)]">
-        <section className="min-w-0">
-          {visibleItems.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-gray-200 py-14 text-center text-sm text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
-              没有找到提示词
+    <main className="safe-area-x min-h-[calc(100vh-80px)] bg-black pb-12 text-zinc-100">
+      <div className="mx-auto max-w-[1920px] px-3 py-5 sm:px-5 lg:px-7">
+        <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <h2 className="text-2xl font-semibold tracking-normal text-white">灵感</h2>
+            <div className="inline-flex rounded-xl border border-zinc-800 bg-zinc-900 p-1">
+              <button type="button" className="rounded-lg px-3 py-1.5 text-sm text-zinc-500" disabled>Images</button>
+              <button type="button" className="rounded-lg bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white">Prompts</button>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
-              {visibleItems.map((item) => (
-                <button
+            <div className="hidden text-sm text-zinc-600 sm:block">{visibleItems.length} / {activeItems.length}</div>
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row lg:max-w-2xl">
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索标题、提示词、标签、文件夹"
+              className="min-w-0 flex-1 rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-2.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-zinc-500"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setCreating(true)
+                setEditingId(null)
+              }}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-zinc-100 px-4 py-2.5 text-sm font-medium text-zinc-950 transition hover:bg-white"
+            >
+              <PlusIcon className="h-4 w-4" />
+              新建
+            </button>
+          </div>
+        </div>
+
+        <div className="mb-5 flex gap-2 overflow-x-auto pb-1">
+          <button
+            type="button"
+            onClick={() => setActiveFolder(ALL_FILTER)}
+            className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+              activeFolder === ALL_FILTER
+                ? 'border-zinc-100 bg-zinc-100 text-zinc-950'
+                : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-600 hover:text-zinc-100'
+            }`}
+          >
+            全部
+          </button>
+          {folders.map(([folder, count]) => (
+            <button
+              key={folder}
+              type="button"
+              onClick={() => setActiveFolder(folder)}
+              className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                activeFolder === folder
+                  ? 'border-zinc-100 bg-zinc-100 text-zinc-950'
+                  : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-600 hover:text-zinc-100'
+              }`}
+            >
+              {folder}
+              <span className="ml-1 opacity-60">{count}</span>
+            </button>
+          ))}
+          {tags.map(([tag, count]) => (
+            <button
+              key={tag}
+              type="button"
+              onClick={() => setActiveFolder(tag)}
+              className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                activeFolder === tag
+                  ? 'border-zinc-100 bg-zinc-100 text-zinc-950'
+                  : 'border-zinc-800 bg-zinc-950 text-zinc-500 hover:border-zinc-600 hover:text-zinc-100'
+              }`}
+            >
+              #{tag}
+              <span className="ml-1 opacity-60">{count}</span>
+            </button>
+          ))}
+        </div>
+
+        {creating && (
+          <section className="mb-5 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+            <div className="mb-3 text-sm font-semibold text-white">新建提示词</div>
+            <PromptEditor
+              initial={createEmptyFormState()}
+              submitLabel="保存"
+              onCancel={() => setCreating(false)}
+              onSubmit={(state) => void handleCreate(state)}
+            />
+          </section>
+        )}
+
+        {editingItem && (
+          <section className="mb-5 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="text-sm font-semibold text-white">编辑提示词</div>
+              <button type="button" onClick={() => setEditingId(null)} className="rounded-lg px-3 py-1.5 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100">
+                收起
+              </button>
+            </div>
+            <PromptEditor
+              initial={formStateFromItem(editingItem)}
+              submitLabel="保存修改"
+              onCancel={() => setEditingId(null)}
+              onSubmit={(state) => void handleUpdate(editingItem, state)}
+            />
+          </section>
+        )}
+
+        {visibleItems.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-zinc-800 py-16 text-center text-sm text-zinc-500">
+            没有找到提示词
+          </div>
+        ) : (
+          <section className="columns-1 gap-4 sm:columns-2 xl:columns-3 2xl:columns-4 [column-fill:_balance]">
+            {visibleItems.map((item) => {
+              const hasImages = item.imageIds.length > 0
+              const primaryImageId = item.coverImageId ?? item.imageIds[0]
+              return (
+                <article
                   key={item.id}
-                  type="button"
+                  onMouseEnter={() => setHoveredItemId(item.id)}
+                  onMouseLeave={() => setHoveredItemId((current) => current === item.id ? null : current)}
+                  onFocus={() => setHoveredItemId(item.id)}
                   onClick={() => {
                     setSelectedId(item.id)
-                    setEditingId(null)
                     setCreating(false)
                   }}
-                  className={`group overflow-hidden rounded-xl border bg-white text-left transition dark:bg-white/[0.03] ${
-                    selectedItem?.id === item.id
-                      ? 'border-gray-900 shadow-sm dark:border-white/60'
-                      : 'border-gray-200 hover:border-gray-300 dark:border-white/[0.08] dark:hover:border-white/20'
-                  }`}
+                  className={`group mb-4 cursor-pointer overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950 transition hover:border-zinc-600 ${getItemHeightClass(item)}`}
                 >
-                  <div className="flex min-h-[132px]">
-                    <div className="h-auto w-28 shrink-0 sm:w-32">
-                      <PromptThumbnail imageId={item.coverImageId ?? item.imageIds[0]} />
+                  {hasImages && (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        useStore.getState().setLightboxImageId(primaryImageId, item.imageIds)
+                      }}
+                      className={`relative block w-full overflow-hidden ${getItemImageClass(item)}`}
+                      aria-label="查看参考图"
+                    >
+                      <PromptThumbnail imageId={primaryImageId} />
+                      {item.imageIds.length > 1 && (
+                        <span className="absolute right-3 top-3 rounded-full bg-black/60 px-2 py-1 text-xs text-white backdrop-blur">{item.imageIds.length} 图</span>
+                      )}
+                    </button>
+                  )}
+                  <div className="relative p-4">
+                    <div className={`absolute right-3 top-3 flex gap-2 opacity-100 transition sm:pointer-events-auto ${hoveredItemId === item.id ? 'sm:opacity-100' : 'sm:opacity-65'}`}>
+                      <ActionButton label="使用提示词" onClick={() => handleUsePrompt(item)}>
+                        <span className="text-base leading-none">✦</span>
+                      </ActionButton>
+                      <ActionButton label="使用参考图" disabled={!hasImages} onClick={() => handleUseImages(item)}>
+                        <PhotoIcon className="h-4 w-4" />
+                      </ActionButton>
+                      <ActionButton label="复制提示词" onClick={() => { void handleCopy(item) }}>
+                        <CopyIcon className="h-4 w-4" />
+                      </ActionButton>
                     </div>
-                    <div className="min-w-0 flex-1 p-3">
-                      <div className="mb-1 flex items-center gap-2">
-                        <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">{item.category}</span>
-                        {item.source === 'builtin' && <span className="text-[11px] text-blue-500">内置</span>}
-                      </div>
-                      <div className="line-clamp-1 text-sm font-semibold text-gray-900 dark:text-white">{item.title}</div>
-                      <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-gray-500 dark:text-gray-400">{item.description || item.prompt}</p>
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {item.tags.slice(0, 3).map((tag) => (
-                          <span key={tag} className="rounded bg-gray-50 px-1.5 py-0.5 text-[11px] text-gray-400 dark:bg-white/[0.04] dark:text-gray-500">{tag}</span>
+                    <div className="mb-3 flex flex-wrap items-center gap-2 pr-28">
+                      <span className="rounded-full bg-zinc-900 px-2 py-0.5 text-[11px] font-medium text-zinc-400">{item.category}</span>
+                      {item.source === 'builtin' && <span className="text-[11px] text-zinc-500">内置</span>}
+                    </div>
+                    <h3 className="pr-2 text-base font-semibold leading-snug text-white">{item.title}</h3>
+                    <p className="mt-2 line-clamp-3 text-sm leading-relaxed text-zinc-400">{item.description || item.prompt}</p>
+                    {item.tags.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {item.tags.slice(0, 4).map((tag) => (
+                          <span key={tag} className="rounded-full bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-500">#{tag}</span>
                         ))}
                       </div>
+                    )}
+                    <div className="mt-4 flex items-center justify-between gap-3 text-xs text-zinc-500">
+                      <span>{formatRelativeTime(item.lastUsedAt || item.updatedAt || item.createdAt)}</span>
+                      <div className="flex gap-2 opacity-70">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            setEditingId(item.id)
+                          }}
+                          className="rounded p-1 hover:bg-zinc-900 hover:text-zinc-100"
+                          title="编辑"
+                          aria-label="编辑"
+                        >
+                          <EditIcon className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            handleDelete(item)
+                          }}
+                          className="rounded p-1 hover:bg-red-500/10 hover:text-red-400"
+                          title="删除"
+                          aria-label="删除"
+                        >
+                          <TrashIcon className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="min-w-0 rounded-xl border border-gray-200 bg-white p-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
-          {!selectedItem ? (
-            <div className="flex min-h-[360px] items-center justify-center text-sm text-gray-400 dark:text-gray-500">
-              选择一条提示词查看详情
-            </div>
-          ) : editingItem ? (
-            <>
-              <div className="mb-3 text-sm font-semibold text-gray-900 dark:text-white">编辑提示词</div>
-              <PromptEditor
-                initial={formStateFromItem(editingItem)}
-                submitLabel="保存修改"
-                onCancel={() => setEditingId(null)}
-                onSubmit={(state) => void handleUpdate(editingItem, state)}
-              />
-            </>
-          ) : (
-            <div className="space-y-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">{selectedItem.category}</span>
-                    {selectedItem.imageIds.length > 0 && <span className="text-xs text-gray-400 dark:text-gray-500">{selectedItem.imageIds.length} 张样图</span>}
-                  </div>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{selectedItem.title}</h3>
-                  {selectedItem.description && <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{selectedItem.description}</p>}
-                </div>
-                <div className="flex shrink-0 gap-1">
-                  <button type="button" onClick={() => handleCopy(selectedItem)} className="rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-white/[0.06] dark:hover:text-gray-200" title="复制">
-                    <CopyIcon className="h-4 w-4" />
-                  </button>
-                  <button type="button" onClick={() => setEditingId(selectedItem.id)} className="rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-white/[0.06] dark:hover:text-gray-200" title="编辑">
-                    <EditIcon className="h-4 w-4" />
-                  </button>
-                  <button type="button" onClick={() => handleDelete(selectedItem)} className="rounded-lg p-2 text-gray-400 transition hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10" title="删除">
-                    <TrashIcon className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-
-              {selectedItem.imageIds.length > 0 && (
-                <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                  {selectedItem.imageIds.map((imageId) => (
-                    <button
-                      key={imageId}
-                      type="button"
-                      onClick={() => useStore.getState().setLightboxImageId(imageId, selectedItem.imageIds)}
-                      className="aspect-square overflow-hidden rounded-lg border border-gray-100 bg-gray-50 dark:border-white/[0.06] dark:bg-white/[0.04]"
-                    >
-                      <PromptThumbnail imageId={imageId} />
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <div className="rounded-lg bg-gray-50 p-3 dark:bg-white/[0.04]">
-                <div className="mb-2 text-xs font-medium text-gray-400 dark:text-gray-500">提示词</div>
-                <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-gray-800 dark:text-gray-200">{selectedItem.prompt}</p>
-              </div>
-
-              {selectedItem.tags.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {selectedItem.tags.map((tag) => (
-                    <span key={tag} className="rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">{tag}</span>
-                  ))}
-                </div>
-              )}
-
-              {selectedItem.notes && (
-                <div className="text-sm leading-relaxed text-gray-500 dark:text-gray-400">
-                  {selectedItem.notes}
-                </div>
-              )}
-
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4 text-xs text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
-                <span>{selectedItem.source === 'task' ? '来自任务' : selectedItem.source === 'builtin' ? '内置示例' : '手动创建'} · 使用 {selectedItem.useCount} 次{selectedItem.lastUsedAt ? ` · 最近 ${formatTime(selectedItem.lastUsedAt)}` : ''}</span>
-                <button
-                  type="button"
-                  onClick={() => usePromptLibraryItem(selectedItem.id)}
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500"
-                >
-                  使用提示词
-                </button>
-              </div>
-            </div>
-          )}
-        </section>
+                </article>
+              )
+            })}
+          </section>
+        )}
       </div>
     </main>
   )
