@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { strToU8, zipSync } from 'fflate'
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { DEFAULT_PARAMS } from './types'
 import { createDefaultFalProfile, createDefaultOpenAIProfile, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS, normalizeSettings } from './lib/apiProfiles'
-import type { AgentConversation, ExportData, StoredImage, StoredImageThumbnail, TaskRecord } from './types'
+import type { AgentConversation, ExportData, PromptLibraryItem, StoredImage, StoredImageThumbnail, TaskRecord } from './types'
 import { getSelectedImageMentionLabel } from './lib/promptImageMentions'
 vi.mock('./lib/db', () => {
   const tasks = new Map<string, TaskRecord>()
   const images = new Map<string, StoredImage>()
   const thumbnails = new Map<string, StoredImageThumbnail>()
   const agentConversations = new Map<string, AgentConversation>()
+  const promptLibraryItems = new Map<string, PromptLibraryItem>()
   let imageSeq = 0
 
   return {
@@ -38,6 +39,17 @@ vi.mock('./lib/db', () => {
     replaceAgentConversations: async (conversations: AgentConversation[]) => {
       agentConversations.clear()
       for (const conversation of conversations) agentConversations.set(conversation.id, conversation)
+    },
+    getAllPromptLibraryItems: async () => [...promptLibraryItems.values()],
+    putPromptLibraryItem: async (item: PromptLibraryItem) => {
+      promptLibraryItems.set(item.id, item)
+      return item.id
+    },
+    deletePromptLibraryItem: async (id: string) => {
+      promptLibraryItems.delete(id)
+    },
+    clearPromptLibraryItems: async () => {
+      promptLibraryItems.clear()
     },
     getImage: async (id: string) => images.get(id),
     getImageThumbnail: async (id: string) => thumbnails.get(id),
@@ -119,12 +131,12 @@ vi.mock('./lib/agentApi', () => ({
     }
   }),
 }))
-import { clearAgentConversations, clearImages, clearTasks, getAllAgentConversations, getAllTasks, getImage, putAgentConversation, putImage, putTask as putDbTask } from './lib/db'
+import { clearAgentConversations, clearImages, clearPromptLibraryItems, clearTasks, getAllAgentConversations, getAllPromptLibraryItems, getAllTasks, getImage, putAgentConversation, putImage, putPromptLibraryItem, putTask as putDbTask } from './lib/db'
 import { callImageApi } from './lib/api'
 import { callAgentResponsesApi, callBatchImageSingle } from './lib/agentApi'
 import { getFalQueuedImageResult } from './lib/falAiImageApi'
 import { removeKeyedBackgroundFromDataUrl } from './lib/transparentImage'
-import { cleanStaleAgentInputDrafts, clearFailedTasks, deleteAgentRoundFromConversation, deleteFavoriteCollection, editOutputs, getActiveAgentRounds, getErrorToastMessage, getGalleryBatchRows, getPersistedState, getTaskApiProfile, importData, initStore, markInterruptedOpenAIRunningTasks, migratePersistedState, regenerateAgentAssistantMessage, remapAgentRoundMentionsForPathChange, removeTask, reuseConfig, submitAgentMessage, submitBatchTasks, submitTask, useStore } from './store'
+import { cleanStaleAgentInputDrafts, clearFailedTasks, deleteAgentRoundFromConversation, deleteFavoriteCollection, editOutputs, exportData, getActiveAgentRounds, getErrorToastMessage, getGalleryBatchRows, getPersistedState, getTaskApiProfile, importData, initStore, markInterruptedOpenAIRunningTasks, migratePersistedState, regenerateAgentAssistantMessage, remapAgentRoundMentionsForPathChange, removeTask, reuseConfig, submitAgentMessage, submitBatchTasks, submitTask, useStore } from './store'
 
 const imageA = { id: 'image-a', dataUrl: 'data:image/png;base64,a' }
 const imageB = { id: 'image-b', dataUrl: 'data:image/png;base64,b' }
@@ -176,11 +188,25 @@ function importFile(data: ExportData): File {
   return { arrayBuffer: async () => buffer } as File
 }
 
+function importZipFile(data: ExportData, files: Record<string, Uint8Array>): File {
+  const zipped = zipSync({ 'manifest.json': strToU8(JSON.stringify(data)), ...files })
+  const buffer = zipped.buffer.slice(zipped.byteOffset, zipped.byteOffset + zipped.byteLength)
+  return { arrayBuffer: async () => buffer } as File
+}
+
 async function flushAsyncTasks(times = 5) {
   for (let i = 0; i < times; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0))
   }
 }
+
+beforeEach(async () => {
+  await clearPromptLibraryItems()
+  useStore.setState({
+    promptLibraryItems: [],
+    confirmDialog: null,
+  })
+})
 
 describe('favorite collection deletion', () => {
   const collectionA = { id: 'collection-a', name: '收藏夹 A', createdAt: 1, updatedAt: 1 }
@@ -231,6 +257,228 @@ describe('favorite collection deletion', () => {
       favoriteCollectionIds: [collectionB.id],
     })
     expect((await getAllTasks()).map((item) => item.id)).toEqual([sharedTask.id])
+  })
+})
+
+describe('prompt library', () => {
+  beforeEach(async () => {
+    await clearTasks()
+    await clearImages()
+    useStore.setState({
+      tasks: [],
+      inputImages: [],
+      galleryInputDraft: null,
+      galleryBatchDraft: {
+        enabled: true,
+        variableCollapsed: false,
+        variableItems: [{ id: 'row-a', text: '变量' }],
+      },
+      prompt: '',
+      maskDraft: null,
+      params: { ...DEFAULT_PARAMS, size: '1024x1024' },
+      appMode: 'gallery',
+      showToast: vi.fn(),
+      setConfirmDialog: useStore.getState().setConfirmDialog,
+    })
+  })
+
+  it('reads and writes prompt library items in IndexedDB', async () => {
+    const item: PromptLibraryItem = {
+      id: 'prompt-db',
+      title: 'DB 提示词',
+      prompt: 'db prompt',
+      category: '测试',
+      tags: ['tag'],
+      imageIds: [],
+      source: 'user',
+      isArchived: false,
+      createdAt: 1,
+      updatedAt: 1,
+      useCount: 0,
+    }
+
+    await putPromptLibraryItem(item)
+
+    expect(await getAllPromptLibraryItems()).toEqual([item])
+  })
+
+  it('saves a task prompt and output images to the prompt library', async () => {
+    const sourceTask = task({
+      id: 'task-source',
+      prompt: '一只蓝色马克杯',
+      outputImages: [imageA.id, imageB.id],
+      favoriteCollectionIds: ['collection-a'],
+      isFavorite: true,
+    })
+    useStore.setState({
+      tasks: [sourceTask],
+      favoriteCollections: [{ id: 'collection-a', name: '产品收藏', createdAt: 1, updatedAt: 1 }],
+      activeFavoriteCollectionId: 'collection-a',
+    })
+
+    const item = await useStore.getState().saveTaskToPromptLibrary(sourceTask)
+
+    expect(item).toMatchObject({
+      prompt: sourceTask.prompt,
+      coverImageId: imageA.id,
+      imageIds: [imageA.id, imageB.id],
+      sourceTaskId: sourceTask.id,
+      sourceFavoriteCollectionId: 'collection-a',
+      category: '产品收藏',
+      source: 'task',
+    })
+    expect(useStore.getState().promptLibraryItems[0]).toMatchObject({ id: item?.id })
+    expect((await getAllPromptLibraryItems())[0]).toMatchObject({ id: item?.id })
+  })
+
+  it('uses a prompt without changing images, mask, params, or gallery batch variables', async () => {
+    const item = await useStore.getState().createPromptLibraryItem({
+      title: '人像',
+      prompt: '柔和光线人像',
+      category: '人像',
+      tags: [],
+      source: 'user',
+    })
+    useStore.setState({
+      prompt: '',
+      inputImages: [{ id: imageA.id, dataUrl: imageA.dataUrl }],
+      maskDraft: { targetImageId: imageA.id, maskDataUrl: 'data:image/png;base64,mask', updatedAt: 1 },
+      params: { ...DEFAULT_PARAMS, size: '1536x1024' },
+      appMode: 'prompts',
+    })
+    const previousImages = useStore.getState().inputImages
+    const previousMask = useStore.getState().maskDraft
+    const previousParams = useStore.getState().params
+    const previousBatch = useStore.getState().galleryBatchDraft
+
+    useStore.getState().usePromptLibraryItem(item!.id)
+
+    const state = useStore.getState()
+    expect(state.appMode).toBe('gallery')
+    expect(state.prompt).toBe('柔和光线人像')
+    expect(state.inputImages).toEqual(previousImages)
+    expect(state.maskDraft).toEqual(previousMask)
+    expect(state.params).toEqual(previousParams)
+    expect(state.galleryBatchDraft).toEqual(previousBatch)
+    expect(state.promptLibraryItems.find((entry) => entry.id === item!.id)?.useCount).toBe(1)
+  })
+
+  it('asks before replacing an existing gallery prompt', async () => {
+    const item = await useStore.getState().createPromptLibraryItem({
+      title: '产品',
+      prompt: '干净产品图',
+      category: '产品',
+      tags: [],
+      source: 'user',
+    })
+    useStore.setState({ appMode: 'gallery', prompt: '已有提示词' })
+
+    useStore.getState().usePromptLibraryItem(item!.id)
+
+    const state = useStore.getState()
+    expect(state.prompt).toBe('已有提示词')
+    expect(state.confirmDialog?.title).toBe('替换当前提示词')
+    state.confirmDialog?.action?.()
+    expect(useStore.getState().prompt).toBe('干净产品图')
+  })
+
+  it('keeps prompt library images when deleting their source task', async () => {
+    await putImage({ id: imageA.id, dataUrl: imageA.dataUrl, source: 'generated', createdAt: 1 })
+    const sourceTask = task({ id: 'task-source', prompt: '提示词', outputImages: [imageA.id] })
+    useStore.setState({ tasks: [sourceTask] })
+    await putDbTask(sourceTask)
+    await useStore.getState().saveTaskToPromptLibrary(sourceTask)
+
+    await removeTask(sourceTask)
+
+    expect(await getImage(imageA.id)).toMatchObject({ id: imageA.id })
+  })
+
+  it('imports prompt library items and referenced images without tasks', async () => {
+    const imported = await importData(importZipFile({
+      version: 4,
+      exportedAt: new Date(0).toISOString(),
+      promptLibraryItems: [{
+        id: 'prompt-import',
+        title: '导入提示词',
+        prompt: '导入的提示词',
+        category: '导入',
+        tags: ['tag'],
+        imageIds: [imageA.id],
+        coverImageId: imageA.id,
+        source: 'user',
+        isArchived: false,
+        createdAt: 1,
+        updatedAt: 1,
+        useCount: 0,
+      }],
+      imageFiles: {
+        [imageA.id]: { path: 'images/image-a.png', createdAt: 1, source: 'generated' },
+      },
+    }, {
+      'images/image-a.png': strToU8('image-a-bytes'),
+    }), { importConfig: false, importTasks: false, importPromptLibrary: true })
+
+    expect(imported).toBe(true)
+    expect(useStore.getState().promptLibraryItems).toHaveLength(1)
+    expect(useStore.getState().promptLibraryItems[0]).toMatchObject({ id: 'prompt-import', coverImageId: imageA.id })
+    expect(await getImage(imageA.id)).toMatchObject({ id: imageA.id })
+  })
+
+  it('exports prompt library items and referenced images', async () => {
+    await putImage({ id: imageA.id, dataUrl: 'data:image/png;base64,aW1hZ2UtYnl0ZXM=', source: 'generated', createdAt: 1_700_000_000_000 })
+    await useStore.getState().createPromptLibraryItem({
+      title: '导出提示词',
+      prompt: '导出的提示词',
+      category: '导出',
+      tags: ['tag'],
+      imageIds: [imageA.id],
+      coverImageId: imageA.id,
+      source: 'user',
+    })
+    let capturedBlob: Blob | null = null
+    const originalCreateObjectURL = URL.createObjectURL
+    const originalRevokeObjectURL = URL.revokeObjectURL
+    const originalDocument = globalThis.document
+    const documentStub = {
+      createElement: vi.fn((tagName: string) => {
+        if (tagName.toLowerCase() === 'a') {
+          return {
+            click: vi.fn(),
+            href: '',
+            download: '',
+          } as unknown as HTMLAnchorElement
+        }
+        throw new Error(`unexpected element: ${tagName}`)
+      }),
+    } as unknown as Document
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn((blob: Blob) => {
+        capturedBlob = blob
+        return 'blob:test'
+      }),
+    })
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    })
+    Object.defineProperty(globalThis, 'document', { configurable: true, value: documentStub })
+
+    try {
+      await exportData({ exportConfig: false, exportTasks: false, exportPromptLibrary: true })
+      expect(capturedBlob).not.toBeNull()
+      const buffer = await capturedBlob!.arrayBuffer()
+      const files = unzipSync(new Uint8Array(buffer))
+      const manifest = JSON.parse(strFromU8(files['manifest.json'])) as ExportData
+      expect(manifest.promptLibraryItems?.[0]).toMatchObject({ title: '导出提示词', imageIds: [imageA.id] })
+      expect(manifest.imageFiles?.[imageA.id]?.path).toBe(`images/${imageA.id}.png`)
+      expect(files[`images/${imageA.id}.png`]).toBeTruthy()
+    } finally {
+      Object.defineProperty(globalThis, 'document', { configurable: true, value: originalDocument })
+      Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: originalCreateObjectURL })
+      Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: originalRevokeObjectURL })
+    }
   })
 })
 

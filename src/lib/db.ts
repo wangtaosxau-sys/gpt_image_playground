@@ -1,12 +1,13 @@
-import type { AgentConversation, TaskRecord, StoredImage, StoredImageThumbnail } from '../types'
+import type { AgentConversation, PromptLibraryItem, TaskRecord, StoredImage, StoredImageThumbnail } from '../types'
 import { getAppStorageName } from './storageNamespace'
 
 const DB_NAME = getAppStorageName()
-const DB_VERSION = 3
+const DB_VERSION = 4
 const STORE_TASKS = 'tasks'
 const STORE_IMAGES = 'images'
 const STORE_THUMBNAILS = 'thumbnails'
 const STORE_AGENT_CONVERSATIONS = 'agentConversations'
+const STORE_PROMPT_LIBRARY_ITEMS = 'promptLibraryItems'
 const THUMBNAIL_MAX_SIZE = 720
 const THUMBNAIL_QUALITY = 0.9
 const THUMBNAIL_VERSION = 2
@@ -29,6 +30,9 @@ function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(STORE_AGENT_CONVERSATIONS)) {
         db.createObjectStore(STORE_AGENT_CONVERSATIONS, { keyPath: 'id' })
+      }
+      if (!db.objectStoreNames.contains(STORE_PROMPT_LIBRARY_ITEMS)) {
+        db.createObjectStore(STORE_PROMPT_LIBRARY_ITEMS, { keyPath: 'id' })
       }
     }
     req.onsuccess = () => resolve(req.result)
@@ -102,6 +106,24 @@ export function replaceAgentConversations(conversations: AgentConversation[]): P
         tx.onabort = () => reject(tx.error)
       }),
   )
+}
+
+// ===== Prompt library =====
+
+export function getAllPromptLibraryItems(): Promise<PromptLibraryItem[]> {
+  return dbTransaction(STORE_PROMPT_LIBRARY_ITEMS, 'readonly', (s) => s.getAll())
+}
+
+export function putPromptLibraryItem(item: PromptLibraryItem): Promise<IDBValidKey> {
+  return dbTransaction(STORE_PROMPT_LIBRARY_ITEMS, 'readwrite', (s) => s.put(item))
+}
+
+export function deletePromptLibraryItem(id: string): Promise<undefined> {
+  return dbTransaction(STORE_PROMPT_LIBRARY_ITEMS, 'readwrite', (s) => s.delete(id))
+}
+
+export function clearPromptLibraryItems(): Promise<undefined> {
+  return dbTransaction(STORE_PROMPT_LIBRARY_ITEMS, 'readwrite', (s) => s.clear())
 }
 
 // ===== Images =====

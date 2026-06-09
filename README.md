@@ -94,6 +94,7 @@
 
 - [本地启动与验证](docs/local-setup.md)：本机开发、代理、模拟 API 与验证命令。
 - [批量功能](docs/batch-features.md)：Gallery 批量变量、并发设置、Agent 批量边界与后续建议。
+- [提示词图库](docs/prompt-library.md)：本地提示词沉淀、样图展示、收藏浅打通和备份规则。
 - [桌面端路线](docs/desktop-roadmap.md)：未来 Wails 方向、`runtimeHost` 能力边界与非目标。
 - [App 路线](docs/mobile-app-roadmap.md)：PWA 优先、Capacitor APK 第二阶段与暂缓路线。
 - [自定义服务商 LLM 提示词](docs/custom-provider-llm-prompt.md)：让 LLM 根据第三方 API 文档生成可导入配置。
