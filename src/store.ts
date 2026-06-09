@@ -1068,6 +1068,7 @@ interface AppState {
   deletePromptLibraryItem: (id: string) => Promise<void>
   saveTaskToPromptLibrary: (task: TaskRecord, options?: { sourceFavoriteCollectionId?: string | null }) => Promise<PromptLibraryItem | null>
   usePromptLibraryItem: (id: string) => void
+  usePromptLibraryItemImages: (id: string) => Promise<void>
 
   // 任务列表
   tasks: TaskRecord[]
@@ -1923,6 +1924,51 @@ export const useStore = create<AppState>()(
           return
         }
         applyPrompt()
+      },
+      usePromptLibraryItemImages: async (id) => {
+        const item = get().promptLibraryItems.find((entry) => entry.id === id)
+        if (!item) return
+        const imageIds = getPromptLibraryItemImageIds(item)
+        if (!imageIds.length) {
+          get().showToast('这条提示词没有关联参考图', 'error')
+          return
+        }
+        const images: InputImage[] = []
+        for (const imageId of imageIds) {
+          const dataUrl = await ensureImageCached(imageId)
+          if (!dataUrl) continue
+          images.push({ id: imageId, dataUrl })
+        }
+        if (!images.length) {
+          get().showToast('关联图片已不存在', 'error')
+          return
+        }
+        set((state) => {
+          const galleryDraft = state.appMode === 'agent' && state.galleryInputDraft
+            ? {
+                ...state.galleryInputDraft,
+                inputImages: images.map((img) => ({ ...img })),
+                maskDraft: null,
+                maskEditorImageId: null,
+              }
+            : {
+                prompt: state.prompt,
+                inputImages: images.map((img) => ({ ...img })),
+                maskDraft: null,
+                maskEditorImageId: null,
+              }
+          return {
+            appMode: 'gallery',
+            inputImages: images,
+            maskDraft: null,
+            maskEditorImageId: null,
+            galleryInputDraft: isEmptyAgentInputDraft(galleryDraft) ? null : copyAgentInputDraft(galleryDraft),
+            selectedTaskIds: [],
+            selectedFavoriteCollectionIds: [],
+            agentEditingRoundId: null,
+          }
+        })
+        get().showToast(`已填入 ${images.length} 张参考图`, 'success')
       },
 
       // Tasks
