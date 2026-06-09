@@ -332,10 +332,13 @@ export default function SettingsModal() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('api')
   const [exportConfig, setExportConfig] = useState(true)
   const [exportTasks, setExportTasks] = useState(true)
+  const [exportPromptLibrary, setExportPromptLibrary] = useState(true)
   const [importConfig, setImportConfig] = useState(true)
   const [importTasks, setImportTasks] = useState(true)
+  const [importPromptLibrary, setImportPromptLibrary] = useState(true)
   const [clearConfig, setClearConfig] = useState(true)
   const [clearTasks, setClearTasks] = useState(true)
+  const [clearPromptLibrary, setClearPromptLibrary] = useState(true)
   const [isImportingData, setIsImportingData] = useState(false)
   const [isImportingJson, setIsImportingJson] = useState(false)
   const [draggedProfileId, setDraggedProfileId] = useState<string | null>(null)
@@ -745,7 +748,7 @@ export default function SettingsModal() {
     if (file) {
       setIsImportingData(true)
       try {
-        const imported = await importData(file, { importConfig, importTasks })
+        const imported = await importData(file, { importConfig, importTasks, importPromptLibrary })
         if (imported) {
           const nextDraft = normalizeSettings(useStore.getState().settings)
           setDraft(nextDraft)
@@ -760,7 +763,7 @@ export default function SettingsModal() {
   }
 
   const handleClearAllData = async () => {
-    await clearData({ clearConfig, clearTasks })
+    await clearData({ clearConfig, clearTasks, clearPromptLibrary })
     const nextDraft = normalizeSettings(useStore.getState().settings)
     setDraft(nextDraft)
     setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
@@ -1947,10 +1950,15 @@ export default function SettingsModal() {
                       onChange={setExportTasks}
                       label="包含任务和图片"
                     />
+                    <Checkbox
+                      checked={exportPromptLibrary}
+                      onChange={setExportPromptLibrary}
+                      label="包含提示词图库"
+                    />
                   </div>
                   <button
-                    onClick={() => exportData({ exportConfig, exportTasks })}
-                    disabled={!exportConfig && !exportTasks}
+                    onClick={() => exportData({ exportConfig, exportTasks, exportPromptLibrary })}
+                    disabled={!exportConfig && !exportTasks && !exportPromptLibrary}
                     className="w-full rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm font-medium text-gray-700 transition-all hover:bg-gray-200 hover:text-gray-900 disabled:opacity-50 disabled:hover:bg-gray-100/80 disabled:hover:text-gray-700 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] dark:hover:text-white dark:disabled:hover:bg-white/[0.06] dark:disabled:hover:text-gray-300 flex items-center justify-center gap-2"
                   >
                     导出所选数据
@@ -1973,10 +1981,15 @@ export default function SettingsModal() {
                       onChange={setImportTasks}
                       label="包含任务和图片"
                     />
+                    <Checkbox
+                      checked={importPromptLibrary}
+                      onChange={setImportPromptLibrary}
+                      label="包含提示词图库"
+                    />
                   </div>
                   <button
                     onClick={() => importInputRef.current?.click()}
-                    disabled={(!importConfig && !importTasks) || isImportingData}
+                    disabled={(!importConfig && !importTasks && !importPromptLibrary) || isImportingData}
                     className="w-full rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm font-medium text-gray-700 transition-all hover:bg-gray-200 hover:text-gray-900 disabled:opacity-50 disabled:hover:bg-gray-100/80 disabled:hover:text-gray-700 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] dark:hover:text-white dark:disabled:hover:bg-white/[0.06] dark:disabled:hover:text-gray-300 flex items-center justify-center gap-2"
                   >
                     {isImportingData ? (
@@ -2018,6 +2031,12 @@ export default function SettingsModal() {
                       label="包含任务和图片"
                       tone="danger"
                     />
+                    <Checkbox
+                      checked={clearPromptLibrary}
+                      onChange={setClearPromptLibrary}
+                      label="包含提示词图库"
+                      tone="danger"
+                    />
                   </div>
                   <button
                     onClick={() =>
@@ -2027,7 +2046,7 @@ export default function SettingsModal() {
                         action: () => handleClearAllData(),
                       })
                     }
-                    disabled={!clearConfig && !clearTasks}
+                    disabled={!clearConfig && !clearTasks && !clearPromptLibrary}
                     className="w-full rounded-xl border border-red-200/60 bg-red-50/50 px-4 py-2.5 text-sm font-medium text-red-500 transition-all hover:bg-red-50 hover:border-red-200 hover:text-red-600 disabled:opacity-50 disabled:hover:bg-red-50/50 disabled:hover:border-red-200/60 disabled:hover:text-red-500 dark:border-red-500/15 dark:bg-red-500/5 dark:text-red-400 dark:hover:bg-red-500/10 dark:hover:border-red-500/30 dark:hover:text-red-300 dark:disabled:hover:bg-red-500/5 dark:disabled:hover:border-red-500/15 dark:disabled:hover:text-red-400"
                   >
                     清空所选数据

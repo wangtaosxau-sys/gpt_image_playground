@@ -1,7 +1,7 @@
 // ===== 设置 =====
 
 export type ApiMode = 'images' | 'responses'
-export type AppMode = 'gallery' | 'agent'
+export type AppMode = 'gallery' | 'agent' | 'prompts'
 export type ReferenceImageEditAction = 'ask' | 'replace-reference' | 'add-mask'
 export const ZIP_DOWNLOAD_ROUTE_VALUES = [
   'task-selection',
@@ -247,6 +247,28 @@ export interface FavoriteCollection {
   updatedAt: number
 }
 
+export type PromptLibrarySource = 'builtin' | 'user' | 'task'
+
+export interface PromptLibraryItem {
+  id: string
+  title: string
+  description?: string
+  prompt: string
+  category: string
+  tags: string[]
+  notes?: string
+  coverImageId?: string
+  imageIds: string[]
+  sourceTaskId?: string
+  sourceFavoriteCollectionId?: string
+  source: PromptLibrarySource
+  isArchived: boolean
+  createdAt: number
+  updatedAt: number
+  useCount: number
+  lastUsedAt?: number
+}
+
 // ===== Agent 模式 =====
 
 export type AgentMessageRole = 'user' | 'assistant'
@@ -444,6 +466,7 @@ export interface ExportData {
   favoriteCollections?: FavoriteCollection[]
   defaultFavoriteCollectionId?: string | null
   agentConversations?: AgentConversation[]
+  promptLibraryItems?: PromptLibraryItem[]
   /** imageId → 图片信息 */
   imageFiles?: Record<string, {
     path: string

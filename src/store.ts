@@ -12,6 +12,7 @@ import type {
   InputImage,
   MaskDraft,
   GalleryBatchDraft,
+  PromptLibraryItem,
   TaskRecord,
   FavoriteCollection,
   ExportData,
@@ -31,6 +32,10 @@ import {
   getAllAgentConversations,
   replaceAgentConversations,
   clearAgentConversations as dbClearAgentConversations,
+  getAllPromptLibraryItems,
+  putPromptLibraryItem,
+  deletePromptLibraryItem as dbDeletePromptLibraryItem,
+  clearPromptLibraryItems,
   getImage,
   getImageThumbnail,
   getStoredFreshImageThumbnail,
@@ -92,7 +97,82 @@ const DEFAULT_GALLERY_BATCH_DRAFT: GalleryBatchDraft = {
   variableCollapsed: false,
   variableItems: [],
 }
+const PROMPT_LIBRARY_UNCATEGORIZED = '未分类'
+const BUILTIN_PROMPT_LIBRARY_ITEMS: Array<Omit<PromptLibraryItem, 'createdAt' | 'updatedAt'>> = [
+  {
+    id: 'builtin-portrait-editorial',
+    title: '杂志感人像',
+    description: '适合干净、有质感的个人头像或人物海报。',
+    prompt: '半身人像，柔和自然光，干净背景，细腻皮肤质感，真实摄影风格，浅景深，构图留白，高级杂志封面氛围',
+    category: '人像',
+    tags: ['摄影', '杂志', '头像'],
+    notes: '',
+    imageIds: [],
+    source: 'builtin',
+    isArchived: false,
+    useCount: 0,
+  },
+  {
+    id: 'builtin-product-clean',
+    title: '干净产品图',
+    description: '适合单个产品主图、详情页首图。',
+    prompt: '单个产品居中展示，柔和棚拍灯光，干净浅色背景，清晰边缘，真实材质，高分辨率商业摄影，画面整洁',
+    category: '产品',
+    tags: ['产品', '商业摄影', '主图'],
+    notes: '',
+    imageIds: [],
+    source: 'builtin',
+    isArchived: false,
+    useCount: 0,
+  },
+  {
+    id: 'builtin-ecommerce-scene',
+    title: '电商场景图',
+    description: '适合把商品放进生活方式场景。',
+    prompt: '生活方式电商场景，产品自然摆放在真实使用环境中，温暖自然光，空间干净，轻微景深，画面突出商品卖点',
+    category: '电商',
+    tags: ['电商', '场景', '生活方式'],
+    notes: '',
+    imageIds: [],
+    source: 'builtin',
+    isArchived: false,
+    useCount: 0,
+  },
+  {
+    id: 'builtin-poster-bold',
+    title: '活动海报视觉',
+    description: '适合宣传海报、活动主视觉，不含文字。',
+    prompt: '大胆的活动海报主视觉，强烈层次，中心主体明确，留出标题排版空间，高对比光影，现代设计感，不生成文字',
+    category: '海报',
+    tags: ['海报', '主视觉', '设计'],
+    notes: '',
+    imageIds: [],
+    source: 'builtin',
+    isArchived: false,
+    useCount: 0,
+  },
+  {
+    id: 'builtin-illustration-story',
+    title: '叙事插画',
+    description: '适合文章配图、故事感插画。',
+    prompt: '叙事感插画，一个清晰主体，丰富但不杂乱的环境细节，温和色彩，干净轮廓，电影感构图，适合作为文章配图',
+    category: '插画',
+    tags: ['插画', '叙事', '文章配图'],
+    notes: '',
+    imageIds: [],
+    source: 'builtin',
+    isArchived: false,
+    useCount: 0,
+  },
+]
 type ToastType = 'info' | 'success' | 'error'
+type PromptLibraryItemInput = Partial<Pick<
+  PromptLibraryItem,
+  'title' | 'description' | 'category' | 'tags' | 'notes' | 'coverImageId' | 'imageIds' | 'sourceTaskId' | 'sourceFavoriteCollectionId' | 'source' | 'isArchived'
+>> & {
+  prompt: string
+}
+type PromptLibraryItemPatch = Partial<Omit<PromptLibraryItem, 'id' | 'createdAt'>>
 type AgentInputDraft = {
   prompt: string
   inputImages: InputImage[]
@@ -647,6 +727,117 @@ function resolveDefaultFavoriteCollectionId(collections: FavoriteCollection[], p
   return collections[0]?.id ?? null
 }
 
+function normalizePromptLibraryText(value: unknown) {
+  return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : ''
+}
+
+function createPromptLibraryTitle(prompt: string) {
+  const chars = Array.from(prompt.replace(/\s+/g, ' ').trim())
+  if (chars.length <= 28) return chars.join('') || '未命名提示词'
+  return `${chars.slice(0, 25).join('')}...`
+}
+
+function normalizePromptLibraryTags(value: unknown) {
+  if (!Array.isArray(value)) return []
+  const tags: string[] = []
+  const seen = new Set<string>()
+  for (const item of value) {
+    const tag = normalizePromptLibraryText(item).slice(0, 24)
+    if (!tag || seen.has(tag)) continue
+    seen.add(tag)
+    tags.push(tag)
+  }
+  return tags.slice(0, 12)
+}
+
+function normalizePromptLibrarySource(value: unknown): PromptLibraryItem['source'] {
+  return value === 'builtin' || value === 'task' || value === 'user' ? value : 'user'
+}
+
+function getPromptLibraryItemImageIds(item: Pick<PromptLibraryItem, 'coverImageId' | 'imageIds'>) {
+  return Array.from(new Set([
+    ...(item.coverImageId ? [item.coverImageId] : []),
+    ...(item.imageIds || []),
+  ].filter(Boolean)))
+}
+
+function addPromptLibraryReferencedImageIds(target: Set<string>, items: PromptLibraryItem[]) {
+  for (const item of items) {
+    for (const id of getPromptLibraryItemImageIds(item)) target.add(id)
+  }
+}
+
+function normalizePromptLibraryItem(value: unknown, now = Date.now()): PromptLibraryItem | null {
+  if (!isRecord(value)) return null
+  const prompt = typeof value.prompt === 'string' ? value.prompt.trim() : ''
+  if (!prompt) return null
+  const id = typeof value.id === 'string' && value.id.trim() ? value.id : genId()
+  const imageIds = Array.isArray(value.imageIds)
+    ? Array.from(new Set(value.imageIds.map(String).filter(Boolean)))
+    : []
+  const rawCoverImageId = typeof value.coverImageId === 'string' && value.coverImageId.trim()
+    ? value.coverImageId
+    : ''
+  const coverImageId = rawCoverImageId || imageIds[0] || undefined
+  const createdAt = typeof value.createdAt === 'number' && Number.isFinite(value.createdAt) ? value.createdAt : now
+  const updatedAt = typeof value.updatedAt === 'number' && Number.isFinite(value.updatedAt) ? value.updatedAt : createdAt
+  const lastUsedAt = typeof value.lastUsedAt === 'number' && Number.isFinite(value.lastUsedAt) ? value.lastUsedAt : undefined
+  const title = normalizePromptLibraryText(value.title).slice(0, 80) || createPromptLibraryTitle(prompt)
+  const category = normalizePromptLibraryText(value.category).slice(0, 40) || PROMPT_LIBRARY_UNCATEGORIZED
+  return {
+    id,
+    title,
+    description: normalizePromptLibraryText(value.description).slice(0, 180) || undefined,
+    prompt,
+    category,
+    tags: normalizePromptLibraryTags(value.tags),
+    notes: typeof value.notes === 'string' ? value.notes.trim().slice(0, 2000) || undefined : undefined,
+    coverImageId,
+    imageIds,
+    sourceTaskId: typeof value.sourceTaskId === 'string' && value.sourceTaskId.trim() ? value.sourceTaskId : undefined,
+    sourceFavoriteCollectionId: typeof value.sourceFavoriteCollectionId === 'string' && value.sourceFavoriteCollectionId.trim() ? value.sourceFavoriteCollectionId : undefined,
+    source: normalizePromptLibrarySource(value.source),
+    isArchived: Boolean(value.isArchived),
+    createdAt,
+    updatedAt,
+    useCount: typeof value.useCount === 'number' && Number.isFinite(value.useCount) ? Math.max(0, Math.floor(value.useCount)) : 0,
+    lastUsedAt,
+  }
+}
+
+function normalizePromptLibraryItems(value: unknown, now = Date.now()): PromptLibraryItem[] {
+  if (!Array.isArray(value)) return []
+  const items: PromptLibraryItem[] = []
+  const seen = new Set<string>()
+  for (const item of value) {
+    const normalized = normalizePromptLibraryItem(item, now)
+    if (!normalized || seen.has(normalized.id)) continue
+    seen.add(normalized.id)
+    items.push(normalized)
+  }
+  return items.sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+function createBuiltinPromptLibraryItems(now = Date.now()): PromptLibraryItem[] {
+  return BUILTIN_PROMPT_LIBRARY_ITEMS.map((item, index) => ({
+    ...item,
+    tags: [...item.tags],
+    imageIds: [...item.imageIds],
+    createdAt: now + index,
+    updatedAt: now + index,
+  }))
+}
+
+function mergePromptLibraryItems(existingItems: PromptLibraryItem[], incomingItems: PromptLibraryItem[]) {
+  const merged = new Map<string, PromptLibraryItem>()
+  for (const item of existingItems) merged.set(item.id, item)
+  for (const item of incomingItems) {
+    const previous = merged.get(item.id)
+    if (!previous || item.updatedAt >= previous.updatedAt) merged.set(item.id, item)
+  }
+  return Array.from(merged.values()).sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
 function createAgentConversation(now = Date.now()): AgentConversation {
   return {
     id: genId(),
@@ -740,7 +931,7 @@ function mergePersistedState(persistedState: unknown, currentState: AppState): A
     typeof persisted.activeAgentConversationId === 'string' && (!hasPersistedAgentConversations || agentConversations.some((conversation) => conversation.id === persisted.activeAgentConversationId))
       ? persisted.activeAgentConversationId
       : agentConversations[0]?.id ?? null
-  const appMode = persisted.appMode === 'agent' ? 'agent' : 'gallery'
+  const appMode = persisted.appMode === 'agent' || persisted.appMode === 'prompts' ? persisted.appMode : 'gallery'
   const galleryInputDraft = settings.persistInputOnRestart
     ? normalizeAgentInputDraft(persisted.galleryInputDraft ?? {
         prompt: persisted.prompt,
@@ -870,6 +1061,14 @@ interface AppState {
   setAgentEditingRoundId: (id: string | null) => void
   setAgentEditingConversationId: (id: string | null) => void
 
+  // Prompt library
+  promptLibraryItems: PromptLibraryItem[]
+  createPromptLibraryItem: (input: PromptLibraryItemInput) => Promise<PromptLibraryItem | null>
+  updatePromptLibraryItem: (id: string, patch: PromptLibraryItemPatch) => Promise<void>
+  deletePromptLibraryItem: (id: string) => Promise<void>
+  saveTaskToPromptLibrary: (task: TaskRecord, options?: { sourceFavoriteCollectionId?: string | null }) => Promise<PromptLibraryItem | null>
+  usePromptLibraryItem: (id: string) => void
+
   // 任务列表
   tasks: TaskRecord[]
   setTasks: (t: TaskRecord[]) => void
@@ -966,6 +1165,7 @@ function isImageReferencedByState(state: AppState, imageId: string) {
     task.maskTargetImageId === imageId ||
     task.maskImageId === imageId
   )) return true
+  if (state.promptLibraryItems.some((item) => getPromptLibraryItemImageIds(item).includes(imageId))) return true
   return state.agentConversations.some((conversation) =>
     conversation.rounds.some((round) =>
       round.inputImageIds.includes(imageId) ||
@@ -1224,8 +1424,22 @@ export const useStore = create<AppState>()(
             selectedTaskIds: [],
             selectedFavoriteCollectionIds: [],
             agentEditingRoundId: null,
-            ...(state.appMode === 'agent' ? restoreGalleryInputDraftState(galleryInputDraft) : {}),
+            ...(state.appMode !== 'gallery' ? restoreGalleryInputDraftState(galleryInputDraft) : {}),
           }))
+          return
+        }
+
+        if (appMode === 'prompts') {
+          const state = get()
+          set({
+            appMode,
+            agentInputDrafts: saveActiveAgentInputDrafts(state),
+            galleryInputDraft: saveGalleryInputDraft(state),
+            agentMobileHeaderVisible: true,
+            selectedTaskIds: [],
+            selectedFavoriteCollectionIds: [],
+            agentEditingRoundId: null,
+          })
           return
         }
 
@@ -1556,6 +1770,160 @@ export const useStore = create<AppState>()(
       setAgentMobileHeaderVisible: (agentMobileHeaderVisible) => set({ agentMobileHeaderVisible }),
       setAgentEditingRoundId: (agentEditingRoundId) => set({ agentEditingRoundId }),
       setAgentEditingConversationId: (agentEditingConversationId) => set({ agentEditingConversationId }),
+
+      // Prompt library
+      promptLibraryItems: [],
+      createPromptLibraryItem: async (input) => {
+        const now = Date.now()
+        const item = normalizePromptLibraryItem({
+          ...input,
+          id: genId(),
+          source: input.source ?? 'user',
+          imageIds: input.imageIds ?? [],
+          isArchived: input.isArchived ?? false,
+          createdAt: now,
+          updatedAt: now,
+          useCount: 0,
+        }, now)
+        if (!item) {
+          get().showToast('提示词不能为空', 'error')
+          return null
+        }
+        set((state) => ({
+          promptLibraryItems: [item, ...state.promptLibraryItems],
+        }))
+        await putPromptLibraryItem(item)
+        get().showToast('已保存到提示词图库', 'success')
+        return item
+      },
+      updatePromptLibraryItem: async (id, patch) => {
+        const previous = get().promptLibraryItems.find((item) => item.id === id)
+        if (!previous) return
+        const now = Date.now()
+        const next = normalizePromptLibraryItem({
+          ...previous,
+          ...patch,
+          id: previous.id,
+          createdAt: previous.createdAt,
+          updatedAt: now,
+        }, now)
+        if (!next) {
+          get().showToast('提示词不能为空', 'error')
+          return
+        }
+        set((state) => ({
+          promptLibraryItems: state.promptLibraryItems.map((item) => item.id === id ? next : item),
+        }))
+        await putPromptLibraryItem(next)
+        get().showToast('提示词已更新', 'success')
+      },
+      deletePromptLibraryItem: async (id) => {
+        const previous = get().promptLibraryItems.find((item) => item.id === id)
+        if (!previous) return
+        const imageIdsToClean = getPromptLibraryItemImageIds(previous)
+        set((state) => ({
+          promptLibraryItems: state.promptLibraryItems.filter((item) => item.id !== id),
+        }))
+        await dbDeletePromptLibraryItem(id)
+        await deleteUnreferencedImageIds(imageIdsToClean)
+        get().showToast('提示词已删除', 'success')
+      },
+      saveTaskToPromptLibrary: async (task, options) => {
+        const prompt = task.prompt.trim()
+        if (!prompt) {
+          get().showToast('任务没有可保存的提示词', 'error')
+          return null
+        }
+        const state = get()
+        const activeCollectionId = state.activeFavoriteCollectionId && state.activeFavoriteCollectionId !== ALL_FAVORITES_COLLECTION_ID
+          ? state.activeFavoriteCollectionId
+          : null
+        const sourceFavoriteCollectionId = options?.sourceFavoriteCollectionId
+          ?? activeCollectionId
+          ?? normalizeFavoriteCollectionIds(task.favoriteCollectionIds)[0]
+          ?? undefined
+        const imageIds = Array.from(new Set(task.outputImages || []))
+        const category = sourceFavoriteCollectionId
+          ? getFavoriteCollectionTitle(sourceFavoriteCollectionId, state.favoriteCollections)
+          : task.sourceMode === 'agent'
+            ? 'Agent'
+            : '画廊'
+        const now = Date.now()
+        const item = normalizePromptLibraryItem({
+          id: genId(),
+          title: createPromptLibraryTitle(prompt),
+          description: imageIds.length ? `来自任务，关联 ${imageIds.length} 张输出图` : '来自任务',
+          prompt,
+          category,
+          tags: task.apiModel ? [task.apiModel] : [],
+          coverImageId: imageIds[0],
+          imageIds,
+          sourceTaskId: task.id,
+          sourceFavoriteCollectionId,
+          source: 'task',
+          isArchived: false,
+          createdAt: now,
+          updatedAt: now,
+          useCount: 0,
+        }, now)
+        if (!item) return null
+        set((state) => ({
+          promptLibraryItems: [item, ...state.promptLibraryItems],
+        }))
+        await putPromptLibraryItem(item)
+        get().showToast('已保存到提示词图库', 'success')
+        return item
+      },
+      usePromptLibraryItem: (id) => {
+        const item = get().promptLibraryItems.find((entry) => entry.id === id)
+        if (!item) return
+        const applyPrompt = () => {
+          const latest = get().promptLibraryItems.find((entry) => entry.id === id) ?? item
+          const usedAt = Date.now()
+          const next = {
+            ...latest,
+            useCount: latest.useCount + 1,
+            lastUsedAt: usedAt,
+          }
+          set((state) => ({
+            promptLibraryItems: state.promptLibraryItems.map((entry) => entry.id === id ? next : entry),
+          }))
+          void putPromptLibraryItem(next)
+          const current = get()
+          const galleryDraft = current.appMode === 'agent' && current.galleryInputDraft
+            ? { ...current.galleryInputDraft, prompt: latest.prompt }
+            : {
+                prompt: latest.prompt,
+                inputImages: current.inputImages.map((img) => ({ ...img })),
+                maskDraft: current.maskDraft ? { ...current.maskDraft } : null,
+                maskEditorImageId: current.maskEditorImageId,
+              }
+          set((state) => ({
+            appMode: 'gallery',
+            agentInputDrafts: saveActiveAgentInputDrafts(state),
+            galleryInputDraft: isEmptyAgentInputDraft(galleryDraft) ? null : copyAgentInputDraft(galleryDraft),
+            agentMobileHeaderVisible: true,
+            selectedTaskIds: [],
+            selectedFavoriteCollectionIds: [],
+            agentEditingRoundId: null,
+            ...restoreGalleryInputDraftState(galleryDraft),
+          }))
+          get().showToast('已填入 Gallery 输入框', 'success')
+        }
+        const state = get()
+        const galleryPrompt = state.appMode === 'gallery' ? state.prompt : state.galleryInputDraft?.prompt ?? ''
+        if (galleryPrompt.trim() && galleryPrompt.trim() !== item.prompt.trim()) {
+          state.setConfirmDialog({
+            title: '替换当前提示词',
+            message: 'Gallery 输入框已有提示词，是否用图库中的提示词替换？参考图、遮罩、参数和批量变量都会保留。',
+            confirmText: '替换',
+            cancelText: '取消',
+            action: applyPrompt,
+          })
+          return
+        }
+        applyPrompt()
+      },
 
       // Tasks
       tasks: [],
@@ -2127,6 +2495,12 @@ export async function initStore() {
   const legacyAgentConversations = normalizeAgentConversations(useStore.getState().agentConversations)
   const storedTasks = await getAllTasks()
   const storedAgentConversations = normalizeAgentConversations(await getAllAgentConversations())
+  let promptLibraryItems = normalizePromptLibraryItems(await getAllPromptLibraryItems())
+  if (promptLibraryItems.length === 0) {
+    promptLibraryItems = createBuiltinPromptLibraryItems()
+    await Promise.all(promptLibraryItems.map((item) => putPromptLibraryItem(item)))
+  }
+  useStore.setState({ promptLibraryItems })
   let loadedAgentConversations = mergeAgentConversationsForStorage(storedAgentConversations, legacyAgentConversations)
   const currentAgentConversations = normalizeAgentConversations(useStore.getState().agentConversations)
   loadedAgentConversations = mergeAgentConversationsForStorage(loadedAgentConversations, currentAgentConversations)
@@ -2215,6 +2589,7 @@ export async function initStore() {
   for (const t of tasks) {
     addTaskReferencedImageIds(referencedIds, t)
   }
+  addPromptLibraryReferencedImageIds(referencedIds, promptLibraryItems)
 
   // 只枚举 key 清理孤立图片，避免启动时把所有 4K 原图读进内存。
   const imageIds = await getAllImageIds()
@@ -2908,9 +3283,11 @@ function addAgentReferencedImageIds(target: Set<string>, conversations = useStor
   for (const conversation of conversations) {
     for (const round of conversation.rounds) {
       for (const id of round.inputImageIds) target.add(id)
+      if (round.maskTargetImageId) target.add(round.maskTargetImageId)
       if (round.maskImageId) target.add(round.maskImageId)
     }
     for (const message of conversation.messages) {
+      if (message.maskTargetImageId) target.add(message.maskTargetImageId)
       if (message.maskImageId) target.add(message.maskImageId)
     }
   }
@@ -2926,6 +3303,7 @@ function addInputDraftReferencedImageIds(target: Set<string>, draft: AgentInputD
 
 function addTaskReferencedImageIds(target: Set<string>, task: TaskRecord) {
   for (const id of task.inputImageIds || []) target.add(id)
+  if (task.maskTargetImageId) target.add(task.maskTargetImageId)
   if (task.maskImageId) target.add(task.maskImageId)
   for (const id of task.outputImages || []) target.add(id)
   for (const id of task.transparentOriginalImages || []) {
@@ -2982,11 +3360,12 @@ async function deleteUnreferencedImageIds(imageIds: Iterable<string>) {
   const candidates = Array.from(new Set(Array.from(imageIds).filter(Boolean)))
   if (candidates.length === 0) return
 
-  const { tasks, inputImages, galleryInputDraft } = useStore.getState()
+  const { tasks, inputImages, galleryInputDraft, promptLibraryItems } = useStore.getState()
   const stillUsed = new Set<string>()
   for (const task of tasks) addTaskReferencedImageIds(stillUsed, task)
   addAgentReferencedImageIds(stillUsed)
   addInputDraftReferencedImageIds(stillUsed, galleryInputDraft)
+  addPromptLibraryReferencedImageIds(stillUsed, promptLibraryItems)
   for (const img of inputImages) stillUsed.add(img.id)
 
   for (const imgId of candidates) {
@@ -4792,6 +5171,7 @@ export async function removeMultipleTasks(taskIds: string[]) {
   }
   addAgentReferencedImageIds(stillUsed)
   addInputDraftReferencedImageIds(stillUsed, galleryInputDraft)
+  addPromptLibraryReferencedImageIds(stillUsed, useStore.getState().promptLibraryItems)
   for (const img of inputImages) stillUsed.add(img.id)
 
   // 删除孤立图片
@@ -4848,6 +5228,7 @@ export async function removeTask(task: TaskRecord) {
   }
   addAgentReferencedImageIds(stillUsed)
   addInputDraftReferencedImageIds(stillUsed, galleryInputDraft)
+  addPromptLibraryReferencedImageIds(stillUsed, useStore.getState().promptLibraryItems)
   for (const img of inputImages) stillUsed.add(img.id)
 
   // 删除孤立图片
@@ -4866,19 +5247,17 @@ export async function removeTask(task: TaskRecord) {
 export interface ClearOptions {
   clearConfig?: boolean
   clearTasks?: boolean
+  clearPromptLibrary?: boolean
 }
 
 /** 清空数据 */
-export async function clearData(options: ClearOptions = { clearConfig: true, clearTasks: true }) {
+export async function clearData(options: ClearOptions = { clearConfig: true, clearTasks: true, clearPromptLibrary: true }) {
   const { setTasks, clearInputImages, clearMaskDraft, setSettings, setParams, showToast } = useStore.getState()
+  const promptLibraryImageIdsToClean = new Set<string>()
 
   if (options.clearTasks) {
     await dbClearTasks()
     await dbClearAgentConversations()
-    await clearImages()
-    imageCache.clear()
-    thumbnailCache.clear()
-    thumbnailBackfillIds.clear()
     setTasks([])
     useStore.setState({
       agentConversations: [],
@@ -4888,6 +5267,23 @@ export async function clearData(options: ClearOptions = { clearConfig: true, cle
     })
     clearInputImages()
     clearMaskDraft()
+  }
+
+  if (options.clearPromptLibrary) {
+    addPromptLibraryReferencedImageIds(promptLibraryImageIdsToClean, useStore.getState().promptLibraryItems)
+    await clearPromptLibraryItems()
+    useStore.setState({ promptLibraryItems: [] })
+  }
+
+  if (options.clearTasks && options.clearPromptLibrary) {
+    await clearImages()
+    imageCache.clear()
+    thumbnailCache.clear()
+    thumbnailBackfillIds.clear()
+  } else if (options.clearTasks) {
+    await deleteUnreferencedImageIds(await getAllImageIds())
+  } else if (options.clearPromptLibrary) {
+    await deleteUnreferencedImageIds(promptLibraryImageIdsToClean)
   }
 
   if (options.clearConfig) {
@@ -4981,18 +5377,26 @@ function formatExportFileTime(date: Date): string {
 export interface ExportOptions {
   exportConfig?: boolean
   exportTasks?: boolean
+  exportPromptLibrary?: boolean
 }
 
 /** 导出数据为 ZIP */
-export async function exportData(options: ExportOptions = { exportConfig: true, exportTasks: true }) {
+export async function exportData(options: ExportOptions = { exportConfig: true, exportTasks: true, exportPromptLibrary: true }) {
   try {
-    const tasks = options.exportTasks ? await getAllTasks() : []
-    const images = options.exportTasks ? await getAllImages() : []
-    const { settings, agentConversations, favoriteCollections, defaultFavoriteCollectionId } = useStore.getState()
+    const shouldExportTasks = Boolean(options.exportTasks)
+    const shouldExportPromptLibrary = Boolean(options.exportPromptLibrary)
+    const tasks = shouldExportTasks ? await getAllTasks() : []
+    const { settings, agentConversations, favoriteCollections, defaultFavoriteCollectionId, promptLibraryItems: statePromptLibraryItems } = useStore.getState()
+    const promptLibraryItems = shouldExportPromptLibrary ? normalizePromptLibraryItems(statePromptLibraryItems) : []
+    const promptLibraryImageIds = new Set<string>()
+    addPromptLibraryReferencedImageIds(promptLibraryImageIds, promptLibraryItems)
+    const images = shouldExportTasks || shouldExportPromptLibrary
+      ? (await getAllImages()).filter((img) => shouldExportTasks || promptLibraryImageIds.has(img.id))
+      : []
     const exportedAt = Date.now()
     const imageCreatedAtFallback = new Map<string, number>()
 
-    if (options.exportTasks) {
+    if (shouldExportTasks) {
       for (const task of tasks) {
         for (const id of [
           ...(task.inputImageIds || []),
@@ -5009,12 +5413,20 @@ export async function exportData(options: ExportOptions = { exportConfig: true, 
         }
       }
     }
+    if (shouldExportPromptLibrary) {
+      for (const item of promptLibraryItems) {
+        for (const id of getPromptLibraryItemImageIds(item)) {
+          const prev = imageCreatedAtFallback.get(id)
+          if (prev == null || item.createdAt < prev) imageCreatedAtFallback.set(id, item.createdAt)
+        }
+      }
+    }
 
     const imageFiles: ExportData['imageFiles'] = {}
     const thumbnailFiles: NonNullable<ExportData['thumbnailFiles']> = {}
     const zipFiles: Record<string, Uint8Array | [Uint8Array, { mtime: Date }]> = {}
 
-    if (options.exportTasks) {
+    if (shouldExportTasks || shouldExportPromptLibrary) {
       for (const img of images) {
         const { ext, bytes } = dataUrlToBytes(img.dataUrl)
         const path = `images/${img.id}.${ext}`
@@ -5052,16 +5464,21 @@ export async function exportData(options: ExportOptions = { exportConfig: true, 
     }
 
     const manifest: ExportData = {
-      version: 3,
+      version: 4,
       exportedAt: new Date(exportedAt).toISOString(),
     }
 
     if (options.exportConfig) manifest.settings = settings
-    if (options.exportTasks) {
+    if (shouldExportTasks) {
       manifest.tasks = tasks
       manifest.favoriteCollections = favoriteCollections
       manifest.defaultFavoriteCollectionId = defaultFavoriteCollectionId
       manifest.agentConversations = getPersistableAgentConversations(agentConversations)
+    }
+    if (shouldExportPromptLibrary) {
+      manifest.promptLibraryItems = promptLibraryItems
+    }
+    if (shouldExportTasks || shouldExportPromptLibrary) {
       manifest.imageFiles = imageFiles
       manifest.thumbnailFiles = thumbnailFiles
     }
@@ -5091,10 +5508,11 @@ export async function exportData(options: ExportOptions = { exportConfig: true, 
 export interface ImportOptions {
   importConfig?: boolean
   importTasks?: boolean
+  importPromptLibrary?: boolean
 }
 
 /** 导入 ZIP 数据 */
-export async function importData(file: File, options: ImportOptions = { importConfig: true, importTasks: true }): Promise<boolean> {
+export async function importData(file: File, options: ImportOptions = { importConfig: true, importTasks: true, importPromptLibrary: true }): Promise<boolean> {
   try {
     const buffer = await file.arrayBuffer()
     const unzipped = unzipSync(new Uint8Array(buffer))
@@ -5104,8 +5522,10 @@ export async function importData(file: File, options: ImportOptions = { importCo
 
     const data: ExportData = JSON.parse(strFromU8(manifestBytes))
 
+    const shouldImportTasks = Boolean(options.importTasks && data.tasks)
+    const shouldImportPromptLibrary = Boolean(options.importPromptLibrary && data.promptLibraryItems)
     const importedImageIds: string[] = []
-    if (options.importTasks && data.tasks && data.imageFiles) {
+    if ((shouldImportTasks || shouldImportPromptLibrary) && data.imageFiles) {
       // 还原图片
       for (const [id, info] of Object.entries(data.imageFiles)) {
         const bytes = unzipped[info.path]
@@ -5141,7 +5561,9 @@ export async function importData(file: File, options: ImportOptions = { importCo
           thumbnailVersion: info.thumbnailVersion,
         })
       }
+    }
 
+    if (shouldImportTasks && data.tasks) {
       for (const task of data.tasks) {
         await putTask(task)
       }
@@ -5179,14 +5601,26 @@ export async function importData(file: File, options: ImportOptions = { importCo
       scheduleThumbnailBackfill(importedImageIds)
     }
 
+    if (shouldImportPromptLibrary) {
+      const importedPromptLibraryItems = normalizePromptLibraryItems(data.promptLibraryItems)
+      const promptLibraryItems = mergePromptLibraryItems(useStore.getState().promptLibraryItems, importedPromptLibraryItems)
+      useStore.setState({ promptLibraryItems })
+      await Promise.all(promptLibraryItems.map((item) => putPromptLibraryItem(item)))
+      scheduleThumbnailBackfill(importedImageIds)
+    }
+
     if (options.importConfig && data.settings) {
       const state = useStore.getState()
       state.setSettings(mergeImportedSettings(state.settings, data.settings))
     }
 
     let msg = '数据已成功导入'
-    if (options.importTasks && data.tasks) {
-      msg = `已导入 ${data.tasks.length} 个任务`
+    if (shouldImportTasks && shouldImportPromptLibrary) {
+      msg = `已导入 ${data.tasks?.length ?? 0} 个任务和 ${data.promptLibraryItems?.length ?? 0} 条提示词`
+    } else if (shouldImportTasks) {
+      msg = `已导入 ${data.tasks?.length ?? 0} 个任务`
+    } else if (shouldImportPromptLibrary) {
+      msg = `已导入 ${data.promptLibraryItems?.length ?? 0} 条提示词`
     } else if (options.importConfig && data.settings) {
       msg = '配置已成功导入'
     }

@@ -24,6 +24,7 @@ export default function DetailModal() {
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const showToast = useStore((s) => s.showToast)
   const openFavoritePicker = useStore((s) => s.openFavoritePicker)
+  const saveTaskToPromptLibrary = useStore((s) => s.saveTaskToPromptLibrary)
   const settings = useStore((s) => s.settings)
   const dismissedCodexCliPrompts = useStore((s) => s.dismissedCodexCliPrompts)
   const streamPreviewSrc = useStore((s) => detailTaskId ? s.streamPreviews[detailTaskId] || '' : '')
@@ -265,6 +266,10 @@ export default function DetailModal() {
   const handleEdit = () => {
     editOutputs(task)
     setDetailTaskId(null)
+  }
+
+  const handleSavePrompt = () => {
+    void saveTaskToPromptLibrary(task)
   }
 
   const handleMaskEditCurrentOutput = () => {
@@ -971,6 +976,14 @@ export default function DetailModal() {
             >
               <EditIcon className="w-4 h-4 flex-shrink-0" />
               编辑输出
+            </button>
+            <button
+              onClick={handleSavePrompt}
+              disabled={!task.prompt.trim()}
+              className="col-span-2 sm:flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-purple-50 dark:bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition text-sm font-medium whitespace-nowrap"
+            >
+              <CodeIcon className="w-4 h-4 flex-shrink-0" />
+              存入图库
             </button>
             <button
               onClick={handleDelete}
