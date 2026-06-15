@@ -48,7 +48,7 @@ import {
   storeImage,
 } from './lib/db'
 import { callImageApi } from './lib/api'
-import { callAgentConversationTitleApi, callAgentResponsesApi, callBatchImageSingle, parseBatchImageCallArguments, type AgentApiResultImage, type BatchImageCallResult } from './lib/agentApi'
+import { callAgentConversationTitleApi, callAgentResponsesApi, callBatchImageSingle, parseBatchImageCallArguments, type AgentApiResultImage } from './lib/agentApi'
 import { collectAgentRoundOutputImageSlots, extractAgentReferenceIds, getAgentCurrentReferenceId, getAgentGeneratedImageReferenceId, replaceAgentPromptImageReferencesForApi } from './lib/agentImageReferences'
 import { showBrowserNotification } from './lib/browserNotification'
 import { IMAGE_FETCH_CORS_HINT } from './lib/imageApiShared'
@@ -2262,6 +2262,32 @@ function scheduleOpenAIWatchdog(taskId: string, timeoutSeconds: number, profile?
   openAIWatchdogTimers.set(taskId, timer)
 }
 
+function usesConcurrentOpenAIImageRequests(profile: ApiProfile, params: TaskParams) {
+  const n = params.n > 0 ? params.n : 1
+  if (profile.provider !== 'openai' || n <= 1) return false
+  if (profile.apiMode === 'responses') return true
+  return profile.apiMode === 'images' && (profile.codexCli || profile.streamImages)
+}
+
+export function taskHasOutputErrors(task: Pick<TaskRecord, 'outputErrors'>) {
+  return Boolean(task.outputErrors?.length)
+}
+
+export function taskMatchesFilterStatus(task: TaskRecord, filterStatus: AppState['filterStatus']) {
+  if (filterStatus === 'all') return true
+  if (filterStatus === 'error') return task.status === 'error' || taskHasOutputErrors(task)
+  return task.status === filterStatus
+}
+
+export function taskMatchesSearchQuery(task: TaskRecord, query: string) {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  const prompt = (task.prompt || '').toLowerCase()
+  const paramStr = JSON.stringify(task.params).toLowerCase()
+  const errorStr = [task.error, ...(task.outputErrors ?? []).map((item) => item.error)].filter(Boolean).join('\n').toLowerCase()
+  return prompt.includes(q) || paramStr.includes(q) || errorStr.includes(q)
+}
+
 export function showCodexCliPrompt(force = false, reason = '接口返回的提示词已被改写') {
   const state = useStore.getState()
   const settings = state.settings
@@ -3085,6 +3111,36 @@ function markAgentRoundTasksStopped(conversationId: string, roundId: string, now
   return runningTasks.length > 0
 }
 
+function markAgentRoundTasksFailed(
+  conversationId: string,
+  roundId: string,
+  error: string,
+  rawResponsePayload?: string,
+  shouldFailTask: (task: TaskRecord) => boolean = () => true,
+  now = Date.now(),
+) {
+  const runningTasks = useStore.getState().tasks.filter((task) =>
+    task.status === 'running' &&
+    task.agentConversationId === conversationId &&
+    task.agentRoundId === roundId &&
+    shouldFailTask(task),
+  )
+
+  for (const task of runningTasks) {
+    useStore.getState().setTaskStreamPreview(task.id)
+    updateTaskInStore(task.id, {
+      status: 'error',
+      error,
+      ...(rawResponsePayload ? { rawResponsePayload } : {}),
+      falRecoverable: false,
+      customRecoverable: false,
+      finishedAt: now,
+      elapsed: Math.max(0, now - task.createdAt),
+    })
+  }
+  return runningTasks.length > 0
+}
+
 function markAgentRoundStopped(conversationId: string, roundId: string) {
   const now = Date.now()
   const stoppedTasks = markAgentRoundTasksStopped(conversationId, roundId, now)
@@ -3693,10 +3749,6 @@ function countResponseToolCalls(output: ResponsesOutputItem[]) {
   return output.filter((item) => item.type === 'image_generation_call').length
 }
 
-function countResponseImageCalls(output: ResponsesOutputItem[]) {
-  return output.filter((item) => item.type === 'image_generation_call').length
-}
-
 function createAgentContinuationInputItem(newImageRefs: string[], toolCallsUsed: number, maxToolCalls: number) {
   const lines = [
     '[System] The app has saved your generated outputs and is continuing the same Agent turn.',
@@ -4176,6 +4228,24 @@ async function executeAgentRound(
       return taskId
     }
 
+    const failAgentImageTask = (toolCallId: string, error: string, rawResponsePayload?: string) => {
+      const taskId = taskIdByToolCallId.get(toolCallId)
+      if (!taskId) return
+      const latestTask = useStore.getState().tasks.find((task) => task.id === taskId)
+      if (!latestTask || latestTask.status !== 'running') return
+
+      useStore.getState().setTaskStreamPreview(taskId)
+      updateTaskInStore(taskId, {
+        status: 'error',
+        error,
+        rawResponsePayload,
+        falRecoverable: false,
+        customRecoverable: false,
+        finishedAt: Date.now(),
+        elapsed: Date.now() - latestTask.createdAt,
+      })
+    }
+
     if (shouldStreamAssistantMessage) {
       updateAgentConversation(conversationId, (current) => ({
         ...current,
@@ -4321,16 +4391,21 @@ async function executeAgentRound(
         const batchItem = batchItems[i]
         if (settled.status === 'fulfilled') {
           const r = settled.value
+          if (!r.image) {
+            failAgentImageTask(batchExecutionItems[i].batchToolCallId, r.error ?? '接口未返回图片数据', r.rawResponsePayload)
+          }
           outputImages.push({
             id: r.batchItemId,
             status: r.image ? 'done' : 'error',
             ...(r.error ? { error: r.error } : {}),
           })
         } else {
+          const error = settled.reason instanceof Error ? settled.reason.message : String(settled.reason)
+          failAgentImageTask(batchExecutionItems[i].batchToolCallId, error)
           outputImages.push({
             id: batchItem.id,
             status: 'error',
-            error: settled.reason instanceof Error ? settled.reason.message : String(settled.reason),
+            error,
           })
         }
       }
@@ -4395,6 +4470,14 @@ async function executeAgentRound(
           ? async (image) => {
               if (controller.signal.aborted) return
               await completeAgentImageTask(image)
+            }
+          : undefined,
+        onImageToolFailed: shouldStreamAssistantMessage
+          ? async ({ toolCallId, error }) => {
+              if (controller.signal.aborted) return
+              await ensureStreamingAgentTask(toolCallId)
+              if (controller.signal.aborted) return
+              failAgentImageTask(toolCallId, error)
             }
           : undefined,
       })
@@ -4561,6 +4644,14 @@ async function executeAgentRound(
       pendingToolTextSeparator = true
     }
 
+    markAgentRoundTasksFailed(
+      conversationId,
+      roundId,
+      '内置 image_generation 工具未返回图片',
+      undefined,
+      (task) => Boolean(task.agentToolCallId && !task.agentBatchCallId),
+    )
+
     const taskIds: string[] = [...streamingTaskIds]
     const outputIds = taskIds.flatMap((taskId) => useStore.getState().tasks.find((task) => task.id === taskId)?.outputImages ?? [])
     const limitNotice = reachedToolLimit ? `已达到最大工具调用次数（${maxToolCalls}），已停止自动续跑。` : ''
@@ -4620,6 +4711,8 @@ async function executeAgentRound(
     if (networkErrorHint && !message.includes(IMAGE_FETCH_CORS_HINT)) {
       message += `\n${networkErrorHint}`
     }
+
+    markAgentRoundTasksFailed(conversationId, roundId, message, getRawErrorPayload(err).rawResponsePayload)
 
     updateAgentConversation(conversationId, (current) => {
       const failedRound = current.rounds.find((round) => round.id === roundId)
@@ -4691,7 +4784,11 @@ async function executeTask(taskId: string) {
     ? { taskId: task.customTaskId }
     : null
 
-  if (taskProvider !== 'fal' && !isAsyncCustomProviderTask(requestSettings, taskProvider, task.inputImageIds.length > 0)) {
+  if (
+    taskProvider !== 'fal' &&
+    !isAsyncCustomProviderTask(requestSettings, taskProvider, task.inputImageIds.length > 0) &&
+    !usesConcurrentOpenAIImageRequests(activeProfile, task.params)
+  ) {
     scheduleOpenAIWatchdog(taskId, activeProfile.timeout, activeProfile)
   }
 
@@ -4790,6 +4887,7 @@ async function executeTask(taskId: string) {
     updateTaskInStore(taskId, {
       outputImages: outputIds,
       transparentOriginalImages: transparentOriginalImageIds,
+      outputErrors: result.failedRequests?.length ? result.failedRequests : undefined,
       streamPartialImageIds: undefined,
       rawImageUrls: result.rawImageUrls?.length ? result.rawImageUrls : undefined,
       actualParams,
@@ -4803,8 +4901,12 @@ async function executeTask(taskId: string) {
     })
     void deleteUnreferencedImageIds(partialImageIdsToClean)
 
-    useStore.getState().showToast(`生成完成，共 ${outputIds.length} 张图片`, 'success')
-    if (!isAgentTask(task)) showTaskCompletionNotification('图像生成完成', `生成完成，共 ${outputIds.length} 张图片。`)
+    const failedCount = result.failedRequests?.length ?? 0
+    const completionMessage = failedCount > 0
+      ? `生成完成：成功 ${outputIds.length} 张，失败 ${failedCount} 张`
+      : `生成完成，共 ${outputIds.length} 张图片`
+    useStore.getState().showToast(completionMessage, failedCount > 0 ? 'error' : 'success')
+    if (!isAgentTask(task)) showTaskCompletionNotification('图像生成完成', `${completionMessage}。`)
     const currentMask = useStore.getState().maskDraft
     if (
       maskDataUrl &&
@@ -5189,7 +5291,7 @@ export async function editOutputs(task: TaskRecord) {
 
 /** 删除多条任务 */
 export async function removeMultipleTasks(taskIds: string[]) {
-  const { tasks, setTasks, inputImages, galleryInputDraft, showToast, clearSelection, selectedTaskIds } = useStore.getState()
+  const { tasks, setTasks, inputImages, galleryInputDraft, showToast, selectedTaskIds } = useStore.getState()
   
   if (!taskIds.length) return
 
@@ -5241,12 +5343,27 @@ export async function removeMultipleTasks(taskIds: string[]) {
 /** 删除所有失败任务 */
 export async function clearFailedTasks(taskIds?: string[]) {
   const targetTaskIds = taskIds ? new Set(taskIds) : null
-  const failedTaskIds = useStore.getState().tasks
-    .filter((task) => task.status === 'error' && (!targetTaskIds || targetTaskIds.has(task.id)))
+  const failedTasks = useStore.getState().tasks
+    .filter((task) => taskMatchesFilterStatus(task, 'error') && (!targetTaskIds || targetTaskIds.has(task.id)))
+  const failedTaskIds = failedTasks
+    .filter((task) => task.status === 'error')
     .map((task) => task.id)
+  const partialFailedTaskIds = new Set(
+    failedTasks
+      .filter((task) => task.status !== 'error' && taskHasOutputErrors(task))
+      .map((task) => task.id),
+  )
 
-  if (!failedTaskIds.length) return
-  await removeMultipleTasks(failedTaskIds)
+  if (failedTaskIds.length) await removeMultipleTasks(failedTaskIds)
+  if (partialFailedTaskIds.size) {
+    const { tasks, setTasks, selectedTaskIds, setSelectedTaskIds, showToast } = useStore.getState()
+    const updated = tasks.map((task) => partialFailedTaskIds.has(task.id) ? { ...task, outputErrors: undefined } : task)
+    setTasks(updated)
+    const nextSelectedTaskIds = selectedTaskIds.filter((id) => !partialFailedTaskIds.has(id))
+    if (nextSelectedTaskIds.length !== selectedTaskIds.length) setSelectedTaskIds(nextSelectedTaskIds)
+    await Promise.all(updated.filter((task) => partialFailedTaskIds.has(task.id)).map((task) => putTask(task)))
+    showToast(`已清除 ${partialFailedTaskIds.size} 条部分失败记录`, 'success')
+  }
 }
 
 /** 删除单条任务 */
