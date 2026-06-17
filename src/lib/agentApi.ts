@@ -1,5 +1,6 @@
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings, type ResponsesApiResponse, type ResponsesOutputItem, type TaskParams } from '../types'
 import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
+import { desktopProxyFetch, disableStreamingForDesktopProxy, effectiveStreamImages } from './desktopProxyFetch'
 import { appendStreamingFormatHint, maybeAppendStreamingHint, getApiErrorMessage, MIME_MAP, normalizeBase64Image, pickActualParams } from './imageApiShared'
 
 export interface AgentApiResultImage {
@@ -93,6 +94,10 @@ function createHeaders(profile: ApiProfile): Record<string, string> {
   }
 }
 
+function shouldStreamImages(profile: ApiProfile): boolean {
+  return effectiveStreamImages(profile.streamImages)
+}
+
 function createImageTool(params: TaskParams, profile: ApiProfile, maskDataUrl?: string): Record<string, unknown> {
   const tool: Record<string, unknown> = {
     type: 'image_generation',
@@ -108,7 +113,7 @@ function createImageTool(params: TaskParams, profile: ApiProfile, maskDataUrl?: 
     tool.output_compression = params.output_compression
   }
 
-  if (profile.streamImages) {
+  if (shouldStreamImages(profile)) {
     tool.partial_images = profile.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES
   }
 
@@ -678,24 +683,24 @@ export async function callAgentResponsesApi(opts: {
       input,
       tools: createAgentTools(params, profile, settings, maskDataUrl),
     }
-    if (profile.streamImages) {
+    if (shouldStreamImages(profile)) {
       body.stream = true
     }
 
-    const response = await fetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
+    const response = await desktopProxyFetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
       method: 'POST',
       headers: createHeaders(profile),
       cache: 'no-store',
-      body: JSON.stringify(body),
+      body: JSON.stringify(disableStreamingForDesktopProxy(body)),
       signal: controller.signal,
     })
 
     if (!response.ok) {
       const errorMessage = await getApiErrorMessage(response)
-      throw new Error(maybeAppendStreamingHint(errorMessage, response.status, profile.streamImages))
+      throw new Error(maybeAppendStreamingHint(errorMessage, response.status, shouldStreamImages(profile)))
     }
 
-    if (profile.streamImages && isEventStreamResponse(response)) {
+    if (shouldStreamImages(profile) && isEventStreamResponse(response)) {
       return parseAgentStreamResponse(response, mime, controller.signal, signal, onTextDelta, onOutputItems, onImageToolStarted, onImagePartialImage, onImageToolCompleted, onImageToolFailed)
     }
 
@@ -738,7 +743,7 @@ export async function callAgentConversationTitleApi(opts: {
       content.push({ type: 'input_image', image_url: dataUrl })
     }
 
-    const response = await fetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
+    const response = await desktopProxyFetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
       method: 'POST',
       headers: createHeaders(profile),
       cache: 'no-store',
@@ -841,7 +846,7 @@ export async function callBatchImageSingle(opts: {
     if (params.output_format !== 'png' && params.output_compression != null) {
       tool.output_compression = params.output_compression
     }
-    if (profile.streamImages) {
+    if (shouldStreamImages(profile)) {
       tool.partial_images = profile.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES
     }
 
@@ -851,25 +856,25 @@ export async function callBatchImageSingle(opts: {
       tools: [tool],
       tool_choice: 'required',
     }
-    if (profile.streamImages) {
+    if (shouldStreamImages(profile)) {
       body.stream = true
     }
 
-    const response = await fetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
+    const response = await desktopProxyFetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
       method: 'POST',
       headers: createHeaders(profile),
       cache: 'no-store',
-      body: JSON.stringify(body),
+      body: JSON.stringify(disableStreamingForDesktopProxy(body)),
       signal: controller.signal,
     })
 
     if (!response.ok) {
       const errorMsg = await getApiErrorMessage(response)
-      return { batchItemId, image: null, error: maybeAppendStreamingHint(errorMsg, response.status, profile.streamImages) }
+      return { batchItemId, image: null, error: maybeAppendStreamingHint(errorMsg, response.status, shouldStreamImages(profile)) }
     }
 
     // Handle streaming
-    if (profile.streamImages && isEventStreamResponse(response)) {
+    if (shouldStreamImages(profile) && isEventStreamResponse(response)) {
       await onImageToolStarted?.()
       let completedImage: AgentApiResultImage | null = null
       let rawPayload: string | undefined

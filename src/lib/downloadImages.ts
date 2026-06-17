@@ -1,6 +1,7 @@
 import { ensureImageCached } from '../store'
 import { zipSync } from 'fflate'
 import type { TaskRecord } from '../types'
+import { desktopProxyFetch } from './desktopProxyFetch'
 
 const MIME_EXTENSIONS: Record<string, string> = {
   'image/png': 'png',
@@ -111,7 +112,7 @@ async function getImageBlob(imageIdOrUrl: string): Promise<Blob> {
     src = await ensureImageCached(imageIdOrUrl) ?? imageIdOrUrl
   }
 
-  const res = await fetch(src)
+  const res = await desktopProxyFetch(src)
   if (!res.ok && !src.startsWith('data:')) throw new Error(`读取图片失败：${imageIdOrUrl}`)
   return await res.blob()
 }

@@ -1,5 +1,7 @@
 import type { AppSettings, TaskParams } from '../types'
 
+import { desktopProxyFetch } from './desktopProxyFetch'
+
 export const MIME_MAP: Record<string, string> = {
   png: 'image/png',
   jpeg: 'image/jpeg',
@@ -139,7 +141,7 @@ export async function fetchImageUrlAsDataUrl(url: string, fallbackMime: string, 
 
   let response: Response
   try {
-    response = await fetch(url, {
+    response = await desktopProxyFetch(url, {
       cache: 'no-store',
       signal,
     })
