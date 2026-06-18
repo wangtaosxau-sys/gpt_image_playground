@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"mime"
@@ -13,15 +15,19 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const (
 	defaultProxyTimeoutSeconds = 120
 	maxProxyResponseBytes      = 600 * 1024 * 1024
+	proxyStreamEventName       = "gpt-image-playground:proxy-stream"
 )
 
 type ProxyAPIRequest struct {
 	URL            string                 `json:"url"`
+	StreamID       string                 `json:"streamId,omitempty"`
 	Method         string                 `json:"method"`
 	Headers        map[string]string      `json:"headers"`
 	BodyText       string                 `json:"bodyText"`
@@ -46,11 +52,160 @@ type ProxyAPIResponse struct {
 	BodyBase64 string            `json:"bodyBase64,omitempty"`
 }
 
+type ProxyStreamStartResponse struct {
+	StreamID string `json:"streamId"`
+}
+
+type ProxyStreamEvent struct {
+	StreamID    string            `json:"streamId"`
+	Type        string            `json:"type"`
+	Status      int               `json:"status,omitempty"`
+	StatusText  string            `json:"statusText,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	ChunkText   string            `json:"chunkText,omitempty"`
+	ChunkBase64 string            `json:"chunkBase64,omitempty"`
+	Error       string            `json:"error,omitempty"`
+}
+
 func (a *App) ProxyAPIRequest(request ProxyAPIRequest) (*ProxyAPIResponse, error) {
 	return proxyAPIRequest(a.ctx, request)
 }
 
+func (a *App) StartProxyStream(request ProxyAPIRequest) (*ProxyStreamStartResponse, error) {
+	streamID := strings.TrimSpace(request.StreamID)
+	if streamID == "" {
+		generatedID, err := createProxyStreamID()
+		if err != nil {
+			return nil, err
+		}
+		streamID = generatedID
+	}
+
+	ctx, cancel := context.WithCancel(parentContext(a.ctx))
+	a.storeProxyStream(streamID, cancel)
+	go func() {
+		defer a.removeProxyStream(streamID)
+		emit := func(event ProxyStreamEvent) {
+			runtime.EventsEmit(a.ctx, proxyStreamEventName, event)
+		}
+		if err := proxyAPIStream(ctx, request, streamID, emit); err != nil {
+			eventType := "error"
+			if ctx.Err() != nil {
+				eventType = "canceled"
+			}
+			emit(ProxyStreamEvent{
+				StreamID: streamID,
+				Type:     eventType,
+				Error:    err.Error(),
+			})
+		}
+	}()
+
+	return &ProxyStreamStartResponse{StreamID: streamID}, nil
+}
+
+func (a *App) CancelProxyStream(streamID string) error {
+	if cancel := a.removeProxyStream(strings.TrimSpace(streamID)); cancel != nil {
+		cancel()
+	}
+	return nil
+}
+
 func proxyAPIRequest(parent context.Context, request ProxyAPIRequest) (*ProxyAPIResponse, error) {
+	timeout := normalizeProxyTimeout(request.TimeoutSeconds)
+	ctx, cancel := context.WithTimeout(parentContext(parent), timeout)
+	defer cancel()
+
+	httpRequest, err := createProxyHTTPRequest(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	client := &http.Client{Timeout: timeout}
+	response, err := client.Do(httpRequest)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+
+	bodyBytes, err := io.ReadAll(io.LimitReader(response.Body, maxProxyResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(bodyBytes) > maxProxyResponseBytes {
+		return nil, fmt.Errorf("proxy response exceeds %d bytes", maxProxyResponseBytes)
+	}
+
+	result := &ProxyAPIResponse{
+		Status:     response.StatusCode,
+		StatusText: response.Status,
+		Headers:    flattenProxyHeaders(response.Header),
+	}
+	if isTextProxyResponse(response.Header.Get("Content-Type")) {
+		result.BodyText = string(bodyBytes)
+	} else {
+		result.BodyBase64 = base64.StdEncoding.EncodeToString(bodyBytes)
+	}
+	return result, nil
+}
+
+func proxyAPIStream(parent context.Context, request ProxyAPIRequest, streamID string, emit func(ProxyStreamEvent)) error {
+	timeout := normalizeProxyTimeout(request.TimeoutSeconds)
+	ctx, cancel := context.WithTimeout(parentContext(parent), timeout)
+	defer cancel()
+
+	httpRequest, err := createProxyHTTPRequest(ctx, request)
+	if err != nil {
+		return err
+	}
+
+	client := &http.Client{Timeout: timeout}
+	response, err := client.Do(httpRequest)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+
+	headers := flattenProxyHeaders(response.Header)
+	emit(ProxyStreamEvent{
+		StreamID:   streamID,
+		Type:       "headers",
+		Status:     response.StatusCode,
+		StatusText: response.Status,
+		Headers:    headers,
+	})
+
+	textResponse := isTextProxyResponse(response.Header.Get("Content-Type"))
+	buffer := make([]byte, 32*1024)
+	for {
+		n, readErr := response.Body.Read(buffer)
+		if n > 0 {
+			chunk := buffer[:n]
+			event := ProxyStreamEvent{
+				StreamID: streamID,
+				Type:     "chunk",
+			}
+			if textResponse {
+				event.ChunkText = string(chunk)
+			} else {
+				event.ChunkBase64 = base64.StdEncoding.EncodeToString(chunk)
+			}
+			emit(event)
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				emit(ProxyStreamEvent{StreamID: streamID, Type: "done"})
+				return nil
+			}
+			return readErr
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+}
+
+func createProxyHTTPRequest(ctx context.Context, request ProxyAPIRequest) (*http.Request, error) {
 	targetURL, err := validateProxyURL(request.URL)
 	if err != nil {
 		return nil, err
@@ -60,9 +215,6 @@ func proxyAPIRequest(parent context.Context, request ProxyAPIRequest) (*ProxyAPI
 	if method != http.MethodGet && method != http.MethodPost {
 		return nil, fmt.Errorf("proxy method must be GET or POST")
 	}
-	timeout := normalizeProxyTimeout(request.TimeoutSeconds)
-	ctx, cancel := context.WithTimeout(parentContext(parent), timeout)
-	defer cancel()
 
 	body, contentType, err := buildProxyRequestBody(request)
 	if err != nil {
@@ -82,40 +234,7 @@ func proxyAPIRequest(parent context.Context, request ProxyAPIRequest) (*ProxyAPI
 	if contentType != "" {
 		httpRequest.Header.Set("Content-Type", contentType)
 	}
-
-	client := &http.Client{Timeout: timeout}
-	response, err := client.Do(httpRequest)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-
-	bodyBytes, err := io.ReadAll(io.LimitReader(response.Body, maxProxyResponseBytes+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(bodyBytes) > maxProxyResponseBytes {
-		return nil, fmt.Errorf("proxy response exceeds %d bytes", maxProxyResponseBytes)
-	}
-
-	headers := map[string]string{}
-	for key, values := range response.Header {
-		if len(values) > 0 {
-			headers[key] = strings.Join(values, ", ")
-		}
-	}
-
-	result := &ProxyAPIResponse{
-		Status:     response.StatusCode,
-		StatusText: response.Status,
-		Headers:    headers,
-	}
-	if isTextProxyResponse(response.Header.Get("Content-Type")) {
-		result.BodyText = string(bodyBytes)
-	} else {
-		result.BodyBase64 = base64.StdEncoding.EncodeToString(bodyBytes)
-	}
-	return result, nil
+	return httpRequest, nil
 }
 
 func parentContext(ctx context.Context) context.Context {
@@ -123,6 +242,45 @@ func parentContext(ctx context.Context) context.Context {
 		return context.Background()
 	}
 	return ctx
+}
+
+func createProxyStreamID() (string, error) {
+	var bytes [16]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		return "", fmt.Errorf("create proxy stream id: %w", err)
+	}
+	return hex.EncodeToString(bytes[:]), nil
+}
+
+func (a *App) storeProxyStream(streamID string, cancel context.CancelFunc) {
+	a.proxyStreamsMu.Lock()
+	defer a.proxyStreamsMu.Unlock()
+	if a.proxyStreams == nil {
+		a.proxyStreams = map[string]context.CancelFunc{}
+	}
+	a.proxyStreams[streamID] = cancel
+}
+
+func (a *App) removeProxyStream(streamID string) context.CancelFunc {
+	if streamID == "" {
+		return nil
+	}
+	a.proxyStreamsMu.Lock()
+	defer a.proxyStreamsMu.Unlock()
+	cancel := a.proxyStreams[streamID]
+	delete(a.proxyStreams, streamID)
+	return cancel
+}
+
+func (a *App) cancelAllProxyStreams() {
+	a.proxyStreamsMu.Lock()
+	streams := a.proxyStreams
+	a.proxyStreams = map[string]context.CancelFunc{}
+	a.proxyStreamsMu.Unlock()
+
+	for _, cancel := range streams {
+		cancel()
+	}
 }
 
 func validateProxyURL(rawURL string) (*url.URL, error) {
@@ -230,6 +388,16 @@ func shouldForwardProxyHeader(key string) bool {
 	default:
 		return true
 	}
+}
+
+func flattenProxyHeaders(header http.Header) map[string]string {
+	headers := map[string]string{}
+	for key, values := range header {
+		if len(values) > 0 {
+			headers[key] = strings.Join(values, ", ")
+		}
+	}
+	return headers
 }
 
 func isTextProxyResponse(contentType string) bool {

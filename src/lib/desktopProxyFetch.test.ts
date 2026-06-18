@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from '../types'
 import { DEFAULT_SETTINGS } from './apiProfiles'
 import { callImageApi } from './api'
-import { desktopProxyFetch, disableStreamingForDesktopProxy, isDesktopProxyAvailable } from './desktopProxyFetch'
+import { desktopProxyFetch, disableStreamingForDesktopProxy, isDesktopProxyAvailable, isDesktopStreamProxyAvailable } from './desktopProxyFetch'
 import { fetchImageUrlAsDataUrl } from './imageApiShared'
 
 describe('desktopProxyFetch', () => {
@@ -11,9 +11,24 @@ describe('desktopProxyFetch', () => {
     delete (globalThis as any).window
   })
 
-  function installWindow(proxy?: (request: any) => Promise<any>) {
+  function installWindow(proxy?: (request: any) => Promise<any>, streamRuntime?: {
+    start?: (request: any) => Promise<any>
+    cancel?: (streamId: string) => Promise<void>
+    eventsOn?: (eventName: string, callback: (...data: unknown[]) => void) => () => void
+  }) {
     ;(globalThis as any).window = {
-      go: proxy ? { main: { App: { ProxyAPIRequest: proxy } } } : undefined,
+      go: proxy || streamRuntime
+        ? {
+            main: {
+              App: {
+                ...(proxy ? { ProxyAPIRequest: proxy } : {}),
+                ...(streamRuntime?.start ? { StartProxyStream: streamRuntime.start } : {}),
+                ...(streamRuntime?.cancel ? { CancelProxyStream: streamRuntime.cancel } : {}),
+              },
+            },
+          }
+        : undefined,
+      runtime: streamRuntime?.eventsOn ? { EventsOn: streamRuntime.eventsOn } : undefined,
     }
   }
 
@@ -108,7 +123,7 @@ describe('desktopProxyFetch', () => {
     expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([1, 2, 3])
   })
 
-  it('removes streaming fields when the desktop proxy is active', () => {
+  it('keeps streaming fields when the desktop stream bridge is active', () => {
     installWindow(vi.fn())
     const body = {
       model: 'model',
@@ -121,6 +136,24 @@ describe('desktopProxyFetch', () => {
     expect(disableStreamingForDesktopProxy(body)).toEqual({
       model: 'model',
       tools: [{ type: 'image_generation' }],
+    })
+
+    const start = vi.fn().mockResolvedValue({ streamId: 'stream-1' })
+    const cancel = vi.fn().mockResolvedValue(undefined)
+    const eventsOn = vi.fn(() => vi.fn())
+    installWindow(vi.fn(), { start, cancel, eventsOn })
+
+    expect(isDesktopStreamProxyAvailable()).toBe(true)
+    expect(disableStreamingForDesktopProxy({
+      model: 'model',
+      stream: true,
+      partial_images: 2,
+      tools: [{ type: 'image_generation', partial_images: 2 }],
+    })).toEqual({
+      model: 'model',
+      stream: true,
+      partial_images: 2,
+      tools: [{ type: 'image_generation', partial_images: 2 }],
     })
   })
 
@@ -144,16 +177,47 @@ describe('desktopProxyFetch', () => {
     expect(dataUrl).toBe('data:image/png;base64,aW1hZ2U=')
   })
 
-  it('downgrades streaming image requests when the desktop proxy is active', async () => {
+  it('streams image requests through the Wails event bridge when available', async () => {
     const proxy = vi.fn().mockResolvedValue({
       status: 200,
       statusText: '200 OK',
       headers: { 'Content-Type': 'application/json' },
       bodyText: JSON.stringify({ data: [{ b64_json: 'aW1hZ2U=' }] }),
     })
-    installWindow(proxy)
+    let streamCallback: ((event: any) => void) | null = null
+    const start = vi.fn().mockImplementation(async (request) => {
+      queueMicrotask(() => {
+        streamCallback?.({
+          streamId: request.streamId,
+          type: 'headers',
+          status: 200,
+          statusText: '200 OK',
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+        streamCallback?.({
+          streamId: request.streamId,
+          type: 'chunk',
+          chunkText: 'data: {"type":"image_generation.partial_image","b64_json":"cGFydGlhbA==","partial_image_index":0}\n\n',
+        })
+        streamCallback?.({
+          streamId: request.streamId,
+          type: 'chunk',
+          chunkText: 'data: {"type":"image_generation.completed","b64_json":"aW1hZ2U="}\n\n',
+        })
+        streamCallback?.({ streamId: request.streamId, type: 'done' })
+      })
+      return { streamId: request.streamId }
+    })
+    const cancel = vi.fn().mockResolvedValue(undefined)
+    const unsubscribe = vi.fn()
+    const eventsOn = vi.fn((eventName: string, callback: (...data: unknown[]) => void) => {
+      streamCallback = callback
+      return unsubscribe
+    })
+    installWindow(proxy, { start, cancel, eventsOn })
+    const partials: string[] = []
 
-    await callImageApi({
+    const result = await callImageApi({
       settings: {
         ...DEFAULT_SETTINGS,
         apiKey: 'test-key',
@@ -169,10 +233,53 @@ describe('desktopProxyFetch', () => {
       prompt: 'prompt',
       params: { ...DEFAULT_PARAMS },
       inputImageDataUrls: [],
+      onPartialImage: (event) => {
+        partials.push(event.image)
+      },
     })
 
-    const body = JSON.parse(proxy.mock.calls[0][0].bodyText)
-    expect(body.stream).toBeUndefined()
-    expect(body.partial_images).toBeUndefined()
+    expect(proxy).not.toHaveBeenCalled()
+    expect(eventsOn).toHaveBeenCalledWith('gpt-image-playground:proxy-stream', expect.any(Function))
+    expect(start).toHaveBeenCalledTimes(1)
+    const body = JSON.parse(start.mock.calls[0][0].bodyText)
+    expect(body.stream).toBe(true)
+    expect(body.partial_images).toBe(2)
+    expect(partials).toEqual(['data:image/png;base64,cGFydGlhbA=='])
+    expect(result.images).toEqual(['data:image/png;base64,aW1hZ2U='])
+    expect(unsubscribe).toHaveBeenCalled()
+  })
+
+  it('cancels Wails stream requests when the response body is canceled', async () => {
+    let streamCallback: ((event: any) => void) | null = null
+    const start = vi.fn().mockImplementation(async (request) => {
+      queueMicrotask(() => {
+        streamCallback?.({
+          streamId: request.streamId,
+          type: 'headers',
+          status: 200,
+          statusText: '200 OK',
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      })
+      return { streamId: request.streamId }
+    })
+    const cancel = vi.fn().mockResolvedValue(undefined)
+    installWindow(vi.fn(), {
+      start,
+      cancel,
+      eventsOn: vi.fn((eventName: string, callback: (...data: unknown[]) => void) => {
+        streamCallback = callback
+        return vi.fn()
+      }),
+    })
+
+    const response = await desktopProxyFetch('https://api.example.com/v1/images/generations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stream: true }),
+    })
+    await response.body?.cancel()
+
+    expect(cancel).toHaveBeenCalledWith(start.mock.calls[0][0].streamId)
   })
 })

@@ -8,6 +8,7 @@ export interface DesktopProxyFormDataPart {
 
 export interface DesktopProxyRequest {
   url: string
+  streamId?: string
   method: string
   headers?: Record<string, string>
   bodyText?: string
@@ -24,8 +25,29 @@ export interface DesktopProxyResponse {
   bodyBase64?: string
 }
 
+export interface DesktopProxyStreamStartResponse {
+  streamId: string
+}
+
+export interface DesktopProxyStreamEvent {
+  streamId: string
+  type: 'headers' | 'chunk' | 'done' | 'error' | 'canceled'
+  status?: number
+  statusText?: string
+  headers?: Record<string, string>
+  chunkText?: string
+  chunkBase64?: string
+  error?: string
+}
+
 interface WailsAppProxy {
   ProxyAPIRequest?: (request: DesktopProxyRequest) => Promise<DesktopProxyResponse>
+  StartProxyStream?: (request: DesktopProxyRequest) => Promise<DesktopProxyStreamStartResponse>
+  CancelProxyStream?: (streamId: string) => Promise<void>
+}
+
+interface WailsRuntimeProxy {
+  EventsOn?: (eventName: string, callback: (...data: unknown[]) => void) => () => void
 }
 
 declare global {
@@ -35,11 +57,21 @@ declare global {
         App?: WailsAppProxy
       }
     }
+    runtime?: WailsRuntimeProxy
   }
 }
 
+const DESKTOP_PROXY_STREAM_EVENT = 'gpt-image-playground:proxy-stream'
+
 export function isDesktopProxyAvailable(): boolean {
   return typeof window !== 'undefined' && typeof window.go?.main?.App?.ProxyAPIRequest === 'function'
+}
+
+export function isDesktopStreamProxyAvailable(): boolean {
+  return typeof window !== 'undefined' &&
+    typeof window.go?.main?.App?.StartProxyStream === 'function' &&
+    typeof window.go?.main?.App?.CancelProxyStream === 'function' &&
+    typeof window.runtime?.EventsOn === 'function'
 }
 
 function shouldUseDesktopProxy(input: RequestInfo | URL): boolean {
@@ -149,6 +181,190 @@ async function createDesktopProxyRequest(input: RequestInfo | URL, init: Request
   return proxyRequest
 }
 
+function decodeBase64ToBytes(value: string): Uint8Array {
+  const binary = atob(value)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return bytes
+}
+
+function isStreamDesktopProxyRequest(request: DesktopProxyRequest): boolean {
+  if (request.bodyText) {
+    try {
+      const payload = JSON.parse(request.bodyText)
+      if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+        return (payload as Record<string, unknown>).stream === true
+      }
+    } catch {
+      return false
+    }
+  }
+
+  if (request.formData) {
+    return request.formData.some((part) => part.name === 'stream' && (part.value === 'true' || part.value === '1'))
+  }
+
+  return false
+}
+
+function buildStreamChunk(event: DesktopProxyStreamEvent): Uint8Array | null {
+  if (typeof event.chunkBase64 === 'string' && event.chunkBase64) {
+    return decodeBase64ToBytes(event.chunkBase64)
+  }
+  if (typeof event.chunkText === 'string') {
+    return new TextEncoder().encode(event.chunkText)
+  }
+  return null
+}
+
+function createDesktopStreamId(): string {
+  const cryptoValue = globalThis.crypto
+  if (cryptoValue?.randomUUID) return cryptoValue.randomUUID()
+  return `stream-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+async function createDesktopProxyStreamResponse(
+  proxyRequest: DesktopProxyRequest,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const runtime = window.runtime
+  const app = window.go?.main?.App
+  const startProxyStream = app?.StartProxyStream
+  const cancelProxyStream = app?.CancelProxyStream
+  const eventsOn = runtime?.EventsOn
+  if (!startProxyStream || !cancelProxyStream || !eventsOn) {
+    const proxy = app?.ProxyAPIRequest
+    if (!proxy) throw new Error('Desktop proxy is unavailable')
+    const response = await proxy(proxyRequest)
+    return createResponseFromDesktopProxy(response)
+  }
+
+  const queuedChunks: Uint8Array[] = []
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null
+  let headersResolved = false
+  let streamClosed = false
+  let startedStreamId = createDesktopStreamId()
+  proxyRequest.streamId = startedStreamId
+  let unsubscribe: () => void = () => undefined
+  let cancelReason: unknown = null
+  let cleanedUp = false
+  let abortHandler: (() => void) | null = null
+  let resolveHeaders: ((value: { status: number; statusText: string; headers: Headers }) => void) | null = null
+  let rejectHeaders: ((reason?: unknown) => void) | null = null
+
+  const headerPromise = new Promise<{ status: number; statusText: string; headers: Headers }>((resolve, reject) => {
+    resolveHeaders = resolve
+    rejectHeaders = reject
+  })
+
+  const cleanup = (cancelUpstream = false) => {
+    if (cleanedUp) return
+    cleanedUp = true
+    unsubscribe()
+    if (abortHandler) signal?.removeEventListener('abort', abortHandler)
+    if (cancelUpstream && startedStreamId) {
+      void cancelProxyStream(startedStreamId).catch(() => undefined)
+    }
+  }
+
+  const flushQueue = () => {
+    if (!controller) return
+    while (queuedChunks.length > 0) {
+      controller.enqueue(queuedChunks.shift()!)
+    }
+    if (streamClosed) {
+      controller.close()
+    }
+  }
+
+  const finishWithError = (error: unknown) => {
+    const err = error instanceof Error ? error : new Error(String(error))
+    cancelReason = err
+    cleanup(true)
+    if (controller) controller.error(err)
+    if (!headersResolved) rejectHeaders?.(err)
+  }
+
+  const onStreamEvent = (...data: unknown[]) => {
+    const raw = data[0]
+    if (!raw || typeof raw !== 'object') return
+    const event = raw as DesktopProxyStreamEvent
+    if (startedStreamId && event.streamId !== startedStreamId) return
+
+    if (event.type === 'error' || event.type === 'canceled') {
+      const error = new Error(event.error || (event.type === 'canceled' ? 'request canceled' : 'stream failed'))
+      finishWithError(error)
+      return
+    }
+
+    if (event.type === 'headers') {
+      if (headersResolved) return
+      headersResolved = true
+      resolveHeaders?.({
+        status: event.status ?? 200,
+        statusText: event.statusText || '',
+        headers: new Headers(event.headers ?? {}),
+      })
+      return
+    }
+
+    if (event.type === 'done') {
+      streamClosed = true
+      flushQueue()
+      cleanup()
+      return
+    }
+
+    if (event.type !== 'chunk') return
+    const chunk = buildStreamChunk(event)
+    if (!chunk) return
+    if (controller) {
+      controller.enqueue(chunk)
+    } else {
+      queuedChunks.push(chunk)
+    }
+  }
+
+  unsubscribe = eventsOn(DESKTOP_PROXY_STREAM_EVENT, onStreamEvent)
+
+  const bodyStream = new ReadableStream<Uint8Array>({
+    start(ctrl) {
+      controller = ctrl
+      flushQueue()
+    },
+    cancel() {
+      cleanup(true)
+    },
+  })
+
+  abortHandler = () => {
+    const error = signal?.reason instanceof Error ? signal.reason : new DOMException('Aborted', 'AbortError')
+    finishWithError(error)
+  }
+  if (signal?.aborted) {
+    abortHandler()
+    throw signal.reason instanceof Error ? signal.reason : new DOMException('Aborted', 'AbortError')
+  }
+  signal?.addEventListener('abort', abortHandler, { once: true })
+
+  try {
+    const started = await startProxyStream(proxyRequest)
+    startedStreamId = started.streamId
+    const headerInfo = await headerPromise
+    if (cancelReason) throw cancelReason instanceof Error ? cancelReason : new Error(String(cancelReason))
+    return new Response(bodyStream, {
+      status: headerInfo.status,
+      statusText: headerInfo.statusText || undefined,
+      headers: headerInfo.headers,
+    })
+  } catch (error) {
+    finishWithError(error)
+    throw error
+  }
+}
+
 function createResponseFromDesktopProxy(response: DesktopProxyResponse): Response {
   const headers = new Headers(response.headers ?? {})
   const body = response.bodyBase64
@@ -166,12 +382,15 @@ export async function desktopProxyFetch(input: RequestInfo | URL, init?: Request
   const proxy = window.go?.main?.App?.ProxyAPIRequest
   if (!proxy) return fetch(input, init)
   const proxyRequest = await createDesktopProxyRequest(input, init)
+  if (isStreamDesktopProxyRequest(proxyRequest) && isDesktopStreamProxyAvailable()) {
+    return createDesktopProxyStreamResponse(proxyRequest, init?.signal ?? undefined)
+  }
   const response = await proxy(proxyRequest)
   return createResponseFromDesktopProxy(response)
 }
 
 export function disableStreamingForDesktopProxy<T extends Record<string, unknown>>(value: T): T {
-  if (!isDesktopProxyAvailable()) return value
+  if (!isDesktopProxyAvailable() || isDesktopStreamProxyAvailable()) return value
   delete value.stream
   delete value.partial_images
   const tools = value.tools
@@ -186,5 +405,5 @@ export function disableStreamingForDesktopProxy<T extends Record<string, unknown
 }
 
 export function effectiveStreamImages(streamImages?: boolean): boolean {
-  return Boolean(streamImages) && !isDesktopProxyAvailable()
+  return Boolean(streamImages) && (!isDesktopProxyAvailable() || isDesktopStreamProxyAvailable())
 }

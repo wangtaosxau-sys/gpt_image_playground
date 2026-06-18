@@ -51,14 +51,14 @@ interface RuntimeHost {
 - Gallery、Agent 和自定义服务商的外部 API 请求可通过 Wails native API proxy 转发。
 - 打包 exe 不依赖 `dev-proxy.config.json`；该文件仍只用于 Vite dev server。
 - 桌面代理只允许 `http/https`，不会把 API key 写入日志或文件。
-- 桌面代理第一版不做真流式；如果启用流式图片，桌面端会自动降级为普通响应。
+- 桌面代理支持 Wails 事件桥流式转发；启用流式图片时，Go 侧读取上游 SSE，前端通过 `ReadableStream` 继续复用现有流式解析逻辑。
+- 桌面流式代理支持取消：用户停止请求、读取取消或超时后，会调用宿主层取消对应上游请求。
 
 仍不做事项：
 
 - 不把 Wails 依赖合入 Web 主线。
 - 不加入 Electron 或 Tauri。
 - 不做系统 keyring 凭据存储。
-- 不做 SSE 真流式转发。
 - 不改变当前 Web 部署路径。
 
 ## 下一阶段
@@ -70,7 +70,7 @@ interface RuntimeHost {
 - API Key 优先进入系统安全凭据存储。
 - 文件保存、选择图片、打开外链都走宿主能力。
 - 保留纯 Web 运行模式。
-- 评估真流式代理，避免牺牲桌面端的流式预览体验。
+- 把当前 Wails 事件桥代理收敛进正式 `runtimeHost`，并补充更细的桌面错误诊断。
 
 ## 风险
 

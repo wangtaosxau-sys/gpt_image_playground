@@ -13,5 +13,11 @@ wails doctor
 wails build -clean -nopackage -nocolour
 ```
 
+Current status:
+
+- `ProxyAPIRequest` handles non-stream requests.
+- `StartProxyStream` and `CancelProxyStream` handle Wails event-bridge streaming for supported requests.
+- The desktop build still embeds the shared Web `dist` output.
+
 Generated files under `frontend/dist`, `wailsjs`, and `build/bin` are not
 committed.

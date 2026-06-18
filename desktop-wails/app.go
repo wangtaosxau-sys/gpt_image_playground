@@ -2,16 +2,21 @@ package main
 
 import (
 	"context"
+	"sync"
 )
 
 // App struct
 type App struct {
-	ctx context.Context
+	ctx            context.Context
+	proxyStreams   map[string]context.CancelFunc
+	proxyStreamsMu sync.Mutex
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	return &App{}
+	return &App{
+		proxyStreams: map[string]context.CancelFunc{},
+	}
 }
 
 // startup is called at application startup
@@ -34,5 +39,5 @@ func (a *App) beforeClose(ctx context.Context) (prevent bool) {
 
 // shutdown is called at application termination
 func (a *App) shutdown(ctx context.Context) {
-	// Perform your teardown here
+	a.cancelAllProxyStreams()
 }
